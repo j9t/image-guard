@@ -4,6 +4,12 @@ Starting with version 5.2.0, all notable changes to Image Guard are documented i
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.4.1] - 2026-09-24
+
+### Changed
+
+* Forced update with the latest dependencies
+
 ## [5.4.0] - 2026-08-13
 
 ### Fixed

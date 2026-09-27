@@ -234,7 +234,7 @@ describe('Image Guard', () => {
     assert.strictEqual(afterStats.size, tempStats.size)
     assert.strictEqual(afterStats.mtime.getTime(), tempStats.mtime.getTime())
 
-    // Cleanup
+    // Clean-up
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
@@ -399,7 +399,7 @@ describe('Image Guard', () => {
     assert.strictEqual(hasTemp, false)
     assert.strictEqual(hasBak, false)
 
-    // Cleanup
+    // Clean-up
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
@@ -421,7 +421,7 @@ describe('Image Guard', () => {
     const hasBak = entries.some(name => name.endsWith('.bak'))
     assert.strictEqual(hasBak, false)
 
-    // Cleanup
+    // Clean-up
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 

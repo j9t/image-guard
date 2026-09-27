@@ -179,7 +179,7 @@ const compression = async (filename, dry, quiet = false) => {
       try {
         await retryFileOperation(() => fs.unlink(tempFilePath))
       } catch {
-        // Best-effort cleanup—ignore all errors to avoid masking the original error
+        // Best-effort clean-up—ignore all errors to avoid masking the original error
       }
     }
 

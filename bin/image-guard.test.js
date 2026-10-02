@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { fileTypes as allowedFileTypes } from '../src/index.js'
 
 const __filename = fileURLToPath(import.meta.url)

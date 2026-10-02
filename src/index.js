@@ -1,7 +1,7 @@
 // This file, which had been forked from imagemin-merlin, was modified for image-guard: https://github.com/sumcumo/imagemin-merlin/compare/master...j9t:master
 
 import { globby, convertPathToPattern } from 'globby'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { parseArgs, styleText } from 'node:util'
 import fsSync from 'node:fs'
 import os from 'node:os'

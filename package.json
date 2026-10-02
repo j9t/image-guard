@@ -9,7 +9,7 @@
     "globby": "^16.2.4",
     "heic-decode": "^2.1.0",
     "sharp": "^0.35.4",
-    "simple-git": "^3.36.0"
+    "simple-git": "^4.0.2"
   },
   "description": "Near-lossless image compressor that’s easy to use and easy to automate",
   "devDependencies": {

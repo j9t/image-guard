@@ -158,11 +158,24 @@ Image Guard is no substitute for image fine-tuning and micro-optimization. That�
 
 That is, micro-optimization still needs to be taken care of through other means, whether manually or through tools. Image Guard just solves the problem that images are checked in or go live that are not compressed _at all_.
 
-## What’s Next?
+## Working on Image Guard
 
-There are a few ideas, like adding light SVG support, or ensuring compatibility with projects in which the project’s .git folder is not at the same level as its package.json (currently, automatic mode doesn’t work in these cases).
+### Benchmarking
 
-Feedback is appreciated: Please [file an issue](https://github.com/j9t/image-guard/issues) or send a pull request. Thank you!
+To check how a change affects speed, memory, and compression, run the benchmark on any local folder with images:
+
+```shell
+npm run benchmark -- ~/Projects
+```
+
+The benchmark copies a deterministic sample of the images (honoring .gitignore) to a temporary folder, runs Image Guard on fresh copies of it several times, and reports the median time, peak memory, and bytes saved. Your images are not modified.
+
+* `--runs <n>` sets the number of runs (default: 3).
+* `--sample <n>` sets the approximate sample size (default: 300). Each format is sampled in proportion to its share, with at least 10 files per format where available.
+* `--save` saves the result as the baseline (benchmark/baseline.json, ignored by Git), which later runs on the same sample compare against.
+* `--profile` additionally compresses each image on its own, in dry mode, and reports the time per format and the slowest files.
+
+To compare a branch with `main`, run the benchmark with `--save` on `main`, then without it on the branch. Differences of around 10% can be noise; use more runs, and repeat a run on `main`, before relying on smaller ones.
 
 ## License
 

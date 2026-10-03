@@ -88,7 +88,7 @@ describe('Image Guard', () => {
     }
   })
 
-  test('Compress images', () => {
+  test('Compresses images', () => {
     // Ensure images in temp folder are not already compressed
     assert.strictEqual(areImagesAlreadyCompressed(testFolderGit), true)
 
@@ -120,7 +120,7 @@ describe('Image Guard', () => {
     assert.strictEqual(allCompressed, true)
   })
 
-  test('Compress only staged images', async () => {
+  test('Compresses only staged images', async () => {
     const git = simpleGit(testFolderGit)
 
     // Ensure the temp folder exists
@@ -147,7 +147,7 @@ describe('Image Guard', () => {
     assert.strictEqual(allCompressed, true)
   })
 
-  test('Ensure files are not modified in dry run', () => {
+  test('Ensures files are not modified in dry run', () => {
     const originalStats = fs.readdirSync(testFolderGit).sort().map(file => {
       const filePath = path.join(testFolderGit, file)
       return { file, stats: fs.statSync(filePath) }
@@ -165,7 +165,7 @@ describe('Image Guard', () => {
     })
   })
 
-  test('Ignore parity: single file (non-staged vs. staged)', async () => {
+  test('Ignores a single file in both non-staged and staged runs', async () => {
     // Prepare isolated temp directory
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-ignore-one-'))
     const tempTestFolder = path.join(tempDir, 'test')
@@ -238,7 +238,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ignore supports multiple patterns and directories; case-insensitive', () => {
+  test('Ignores multiple patterns and directories, case-insensitively', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-ignore-multi-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -301,7 +301,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ignore a directory with `--staged`', async () => {
+  test('Ignores a directory with `--staged`', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-staged-dir-'))
     const subDir = path.join(tempDir, 'Assets')
     fs.mkdirSync(subDir, { recursive: true })
@@ -333,7 +333,7 @@ describe('Image Guard', () => {
     assert.ok(outsideAfter.size < outsideBefore.size, 'File outside the ignored directory should be compressed')
   })
 
-  test('Ensure quiet mode suppresses per-file logs but keeps summary', () => {
+  test('Ensures quiet mode suppresses per-file logs but keeps summary', () => {
     // Prepare isolated temp directory with test images
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-quiet-'))
     const tempTestFolder = path.join(tempDir, 'test')
@@ -355,7 +355,7 @@ describe('Image Guard', () => {
     assert.strictEqual(!(/Compressed|Skipped/.test(stdout)), true)
   })
 
-  test('Ensure dry and quiet runs leave no artifacts and do not mutate files', () => {
+  test('Ensures dry and quiet runs leave no artifacts and do not mutate files', () => {
     // Use isolated temp directory
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-dry-quiet-'))
     const tempTestFolder = path.join(tempDir, 'test')
@@ -403,7 +403,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ensure no .bak files remain after normal compression', () => {
+  test('Ensures no .bak files remain after normal compression', () => {
     // Prepare isolated temp directory with test images
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-bak-'))
     const tempTestFolder = path.join(tempDir, 'test')
@@ -425,7 +425,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Convert HEIC to AVIF with `--heic-to-avif`', () => {
+  test('Converts HEIC to AVIF with `--heic-to-avif`', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-heic-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -463,7 +463,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ensure `--keep-heic` preserves original HEIC file', () => {
+  test('Ensures `--keep-heic` preserves original HEIC file', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-keep-heic-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -486,7 +486,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ensure dry run does not convert HEIC files but reports sizes', () => {
+  test('Ensures dry run does not convert HEIC files but reports sizes', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-heic-dry-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -525,7 +525,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Ensure HEIC files are ignored without `--heic-to-avif` flag', () => {
+  test('Ensures HEIC files are ignored without `--heic-to-avif` flag', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-heic-noflag-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -549,7 +549,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Skip and report corrupt files', () => {
+  test('Skips and reports corrupt files', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-corrupt-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -567,7 +567,7 @@ describe('Image Guard', () => {
     assert.match(output, /Skipped.*test#corrupt\.gif.*corrupt file/i)
   })
 
-  test('Ensure `--keep-heic` without `--heic-to-avif` issues warning', () => {
+  test('Ensures `--keep-heic` without `--heic-to-avif` issues warning', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-keep-warn-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -588,7 +588,7 @@ describe('Image Guard', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test('Compress images in a directory given as an argument', () => {
+  test('Compresses images in a directory given as an argument', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-path-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -621,7 +621,7 @@ describe('Image Guard', () => {
     assert.ok(nestedProcessedAfter.size < nestedProcessedBefore.size, 'Non-ignored file in the same directory should be compressed')
   })
 
-  test('Honor .gitignore rules from parent directories up to the repository root', async () => {
+  test('Honors .gitignore rules from parent directories up to the repository root', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-gitignore-parent-'))
     const subDir = path.join(tempDir, 'sub')
     const buildDir = path.join(subDir, 'build')
@@ -656,7 +656,7 @@ describe('Image Guard', () => {
     assert.ok(after.processed.size < before.processed.size, 'Non-ignored file should be compressed')
   })
 
-  test('Resolve `--ignore` relative to the directory argument', () => {
+  test('Resolves `--ignore` relative to the directory argument', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-path-ignore-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -682,47 +682,47 @@ describe('Image Guard', () => {
     assert.ok(shrunkCount >= 1, 'Expected at least one non-ignored file to be compressed')
   })
 
-  test('Fail on a directory that does not exist', () => {
+  test('Fails on a directory that does not exist', () => {
     assert.throws(
       () => execFileSync(process.execPath, [imageGuardScript, './no-such-directory'], { cwd: os.tmpdir(), stdio: 'pipe' }),
       /No such directory/
     )
   })
 
-  test('Fail on a file given instead of a directory', () => {
+  test('Fails on a file given instead of a directory', () => {
     const run = spawnSync(process.execPath, [imageGuardScript, path.join(testFolder, 'test.png')], { cwd: os.tmpdir(), encoding: 'utf8' })
     assert.strictEqual(run.status, 1)
     assert.match(run.stderr, /Not a directory/)
     assert.doesNotMatch(run.stderr, /Error running Image Guard:/)
   })
 
-  test('Reject a path combined with `--staged`', () => {
+  test('Rejects a path combined with `--staged`', () => {
     assert.throws(
       () => execFileSync(process.execPath, [imageGuardScript, '--staged', '.'], { cwd: os.tmpdir(), stdio: 'pipe' }),
       /takes its files from Git/
     )
   })
 
-  test('Reject more than one path', () => {
+  test('Rejects more than one path', () => {
     assert.throws(
       () => execFileSync(process.execPath, [imageGuardScript, '.', '..'], { cwd: os.tmpdir(), stdio: 'pipe' }),
       /Expected at most one path/
     )
   })
 
-  test('Show help with `--help`', () => {
+  test('Shows help with `--help`', () => {
     const output = execFileSync(process.execPath, [imageGuardScript, '--help'], { cwd: os.tmpdir(), encoding: 'utf8' })
     assert.match(output, /Usage: image-guard \[options\] \[directory\]/)
     assert.match(output, /--heic-to-avif/)
     assert.match(output, /--staged/)
   })
 
-  test('Show help with `-h`', () => {
+  test('Shows help with `-h`', () => {
     const output = execFileSync(process.execPath, [imageGuardScript, '-h'], { cwd: os.tmpdir(), encoding: 'utf8' })
     assert.match(output, /Usage: image-guard/)
   })
 
-  test('Point at `--help` for an unknown option', () => {
+  test('Points at `--help` for an unknown option', () => {
     const run = spawnSync(process.execPath, [imageGuardScript, '--bogus'], { cwd: os.tmpdir(), encoding: 'utf8' })
     assert.strictEqual(run.status, 1)
     assert.match(run.stderr, /Unknown option .+image-guard --help/)
@@ -731,14 +731,14 @@ describe('Image Guard', () => {
     assert.doesNotMatch(run.stderr, /Error running Image Guard:/)
   })
 
-  test('List every short form in the help output', () => {
+  test('Lists every short form in the help output', () => {
     const output = execFileSync(process.execPath, [imageGuardScript, '--help'], { cwd: os.tmpdir(), encoding: 'utf8' })
     for (const [short, long] of [['-i', '--ignore'], ['-q', '--quiet'], ['-d', '--dry'], ['-h', '--help'], ['-V', '--version']]) {
       assert.match(output, new RegExp(`${short}, ${long}\\b`), `Help should pair ${short} with ${long}`)
     }
   })
 
-  test('Show the version with `--version` and `-V`', () => {
+  test('Shows the version with `--version` and `-V`', () => {
     const { version } = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'))
     for (const flag of ['--version', '-V']) {
       const output = execFileSync(process.execPath, [imageGuardScript, flag], { cwd: os.tmpdir(), encoding: 'utf8' })
@@ -746,7 +746,7 @@ describe('Image Guard', () => {
     }
   })
 
-  test('Treat `-d` and `-q` like their long forms, including as a group', () => {
+  test('Treats `-d` and `-q` like their long forms, including as a group', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-short-flags-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)
@@ -771,7 +771,7 @@ describe('Image Guard', () => {
     })
   })
 
-  test('Accept `-i` as the short form of `--ignore`', () => {
+  test('Accepts `-i` as the short form of `--ignore`', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-short-ignore-'))
     const tempTestFolder = path.join(tempDir, 'test')
     copyFiles(testFolder, tempTestFolder)

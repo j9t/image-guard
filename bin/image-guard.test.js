@@ -621,6 +621,41 @@ describe('Image Guard', () => {
     assert.ok(nestedProcessedAfter.size < nestedProcessedBefore.size, 'Non-ignored file in the same directory should be compressed')
   })
 
+  test('Honor .gitignore rules from parent directories up to the repository root', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-gitignore-parent-'))
+    const subDir = path.join(tempDir, 'sub')
+    const buildDir = path.join(subDir, 'build')
+    fs.mkdirSync(buildDir, { recursive: true })
+
+    await simpleGit(tempDir).init()
+    fs.writeFileSync(path.join(tempDir, '.gitignore'), 'build/\n*.png\n!keep.png\n')
+
+    const files = {
+      ignoredByPattern: path.join(subDir, 'test.png'),
+      ignoredByDirectory: path.join(buildDir, 'test.jpg'),
+      unignored: path.join(subDir, 'keep.png'),
+      processed: path.join(subDir, 'test.jpg')
+    }
+    fs.copyFileSync(path.join(testFolder, 'test.png'), files.ignoredByPattern)
+    fs.copyFileSync(path.join(testFolder, 'test.jpg'), files.ignoredByDirectory)
+    fs.copyFileSync(path.join(testFolder, 'test.png'), files.unignored)
+    fs.copyFileSync(path.join(testFolder, 'test.jpg'), files.processed)
+    const before = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, fs.statSync(file)]))
+
+    execFileSync(process.execPath, [imageGuardScript, subDir], { cwd: os.tmpdir(), stdio: 'pipe' })
+
+    const after = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, fs.statSync(file)]))
+
+    fs.rmSync(tempDir, { recursive: true, force: true })
+
+    for (const key of ['ignoredByPattern', 'ignoredByDirectory']) {
+      assert.strictEqual(after[key].size, before[key].size, `${key} should be untouched`)
+      assert.strictEqual(after[key].mtime.getTime(), before[key].mtime.getTime())
+    }
+    assert.ok(after.unignored.size < before.unignored.size, 'File re-included by a negation should be compressed')
+    assert.ok(after.processed.size < before.processed.size, 'Non-ignored file should be compressed')
+  })
+
   test('Resolve `--ignore` relative to the directory argument', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-path-ignore-'))
     const tempTestFolder = path.join(tempDir, 'test')

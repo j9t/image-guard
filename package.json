@@ -6,15 +6,16 @@
     "imagemin-merlin": "bin/image-guard.sh"
   },
   "dependencies": {
-    "globby": "^16.2.4",
     "heic-decode": "^2.1.0",
+    "ignore": "^7.0.12",
     "sharp": "^0.35.5",
-    "simple-git": "^4.0.2"
+    "simple-git": "^4.0.2",
+    "tinyglobby": "^0.2.17"
   },
   "description": "Near-lossless image compressor that’s easy to use and easy to automate",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "globals": "^17.13.0"
   },
   "files": [
@@ -55,5 +56,5 @@
     "test": "node --test bin/image-guard.test.js"
   },
   "type": "module",
-  "version": "5.4.1"
+  "version": "5.4.2"
 }

@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 * Replaced globby with tinyglobby and ignore, removing the dependency on braces (GHSA-vfj7-8cjw-p6xm), which has no fixed release
 * Sped up compression by up to around 35% by processing up to 8 files in parallel (previously capped at 4 by the default libuv thread pool)
+* Declared Node.js 22.13 as the minimum version (`engines`)
 * Extended test coverage for .gitignore rules from parent directories
 
 ## [5.4.1] - 2026-09-24

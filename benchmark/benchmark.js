@@ -76,6 +76,8 @@ function runImageGuard(dirCorpus, dirWork) {
   const start = performance.now()
   const run = spawnSync(process.execPath, ['--import', hookPeakMemory, scriptImageGuard, '-q', dirWork], { encoding: 'utf8' })
   const time = (performance.now() - start) / 1000
+  // The child shares the terminal, so Ctrl + C stops it, too
+  if (run.signal) throw Object.assign(new Error(`Interrupted (${run.signal})`), { signal: run.signal })
   if (run.status !== 0) throw new Error(`Image Guard failed:\n${run.stderr}`)
   const peakMemory = Number(run.stderr.match(/maxRSS=(\d+)/)[1]) * 1024
   return { time, peakMemory, saved: dirSize(dirCorpus) - dirSize(dirWork) }
@@ -119,15 +121,24 @@ async function main() {
   if (found.length === 0) throw new Error(`No images found in ${options.dir}`)
   const sample = sampleFiles(found, options.sample)
 
-  // Prefixing the index keeps files from different folders apart
   const dirTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-benchmark-'))
   const dirCorpus = path.join(dirTemp, 'corpus')
   const dirWork = path.join(dirTemp, 'work')
-  fs.mkdirSync(dirCorpus)
-  const names = sample.map((file, i) => `${String(i).padStart(4, '0')}-${path.basename(file)}`)
-  sample.forEach((file, i) => fs.copyFileSync(path.join(dirSource, file), path.join(dirCorpus, names[i])))
+  const cleanUp = () => fs.rmSync(dirTemp, { recursive: true, force: true })
+
+  // A signal skips `finally`, which would leave the copied images behind
+  const onSignal = (signal) => {
+    cleanUp()
+    process.exit(128 + os.constants.signals[signal])
+  }
+  process.once('SIGINT', onSignal).once('SIGTERM', onSignal)
 
   try {
+    // Prefixing the index keeps files from different folders apart
+    fs.mkdirSync(dirCorpus)
+    const names = sample.map((file, i) => `${String(i).padStart(4, '0')}-${path.basename(file)}`)
+    sample.forEach((file, i) => fs.copyFileSync(path.join(dirSource, file), path.join(dirCorpus, names[i])))
+
     const formats = [...Map.groupBy(sample, getFormat)].sort((a, b) => b[1].length - a[1].length).map(([format, list]) => `${format} ${list.length}`).join(', ')
     console.log(`Sample: ${sample.length.toLocaleString('en-US')} of ${found.length.toLocaleString('en-US')} images (${formats}), ${formatBytes(dirSize(dirCorpus))}\n`)
 
@@ -159,7 +170,7 @@ async function main() {
 
     if (options.profile) await profile(dirCorpus, names, sample)
   } finally {
-    fs.rmSync(dirTemp, { recursive: true, force: true })
+    cleanUp()
   }
 }
 
@@ -167,6 +178,7 @@ if (import.meta.main) {
   try {
     await main()
   } catch (err) {
+    if (err.signal) process.exit(128 + os.constants.signals[err.signal])
     console.error(err.message)
     process.exit(1)
   }

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { parseOptions, sampleFiles, median } from './benchmark.js'
+import { parseOptions, sampleFiles, median, formatDelta } from './benchmark.js'
 
 describe('Benchmark', () => {
   test('Parses options with defaults', () => {
@@ -20,9 +20,8 @@ describe('Benchmark', () => {
     assert.throws(() => parseOptions(['--sample', 'x', 'images']), /`--sample` must be a positive integer/)
   })
 
-  test('Keeps every file when the sample is larger than the input', () => {
-    const files = ['a.png', 'b.jpg', 'c.gif']
-    assert.deepStrictEqual(sampleFiles(files, 10), files)
+  test('Keeps every file, sorted, when the sample is larger than the input', () => {
+    assert.deepStrictEqual(sampleFiles(['c.gif', 'a.png', 'b.jpg'], 10), ['a.png', 'b.jpg', 'c.gif'])
   })
 
   test('Samples proportionally per format, with a floor for rare formats', () => {
@@ -46,5 +45,16 @@ describe('Benchmark', () => {
   test('Computes the median', () => {
     assert.strictEqual(median([3, 1, 2]), 2)
     assert.strictEqual(median([4, 1, 3, 2]), 2.5)
+  })
+
+  test('Formats deltas relative to the baseline', () => {
+    assert.strictEqual(formatDelta(110, 100), '+10.0%')
+    assert.strictEqual(formatDelta(90, 100), '−10.0%')
+    assert.strictEqual(formatDelta(100, 100), '±0%')
+  })
+
+  test('Reports no percentage against a zero baseline unless both are zero', () => {
+    assert.strictEqual(formatDelta(0, 0), '±0%')
+    assert.strictEqual(formatDelta(65740, 0), 'n/a')
   })
 })

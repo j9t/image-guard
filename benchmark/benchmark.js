@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { glob } from 'tinyglobby'
 import { fileTypes } from '../src/index.js'
 import { createGitignoreFilter } from '../src/gitignore.js'
@@ -42,8 +43,9 @@ export function parseOptions(args) {
 
 // Takes evenly spaced files per format, proportional to each format’s share, but at least 10 (or all) of each
 export function sampleFiles(files, size) {
-  if (files.length <= size) return files
-  const byFormat = Map.groupBy([...files].sort(), getFormat)
+  const sorted = [...files].sort()
+  if (sorted.length <= size) return sorted
+  const byFormat = Map.groupBy(sorted, getFormat)
   const sample = []
   for (const list of byFormat.values()) {
     const n = Math.min(list.length, Math.max(10, Math.round(size * list.length / files.length)))
@@ -61,8 +63,8 @@ export function median(values) {
 
 const formatBytes = (bytes) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1024).toFixed(1)} KB`
 
-const formatDelta = (current, baseline) => {
-  if (!baseline) return '±0%'
+export const formatDelta = (current, baseline) => {
+  if (baseline === 0) return current === 0 ? '±0%' : 'n/a'
   const delta = (current - baseline) / baseline * 100
   if (Math.abs(delta) < 0.05) return '±0%'
   return `${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)}%`
@@ -174,7 +176,8 @@ async function main() {
   }
 }
 
-if (import.meta.main) {
+// Not `import.meta.main`, which needs Node 24.2 or later
+if (fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     await main()
   } catch (err) {

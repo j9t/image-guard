@@ -148,8 +148,14 @@ Options:
     })
   }
 
-  const desiredFileConcurrency = Math.min(os.cpus().length, 4)
-  const perTaskThreads = Math.max(1, Math.floor(os.cpus().length / Math.max(1, desiredFileConcurrency)))
+  // Capped to bound memory, as each file in flight holds its decoded pixels
+  const desiredFileConcurrency = Math.min(os.availableParallelism(), 8)
+  const perTaskThreads = Math.max(1, Math.floor(os.availableParallelism() / desiredFileConcurrency))
+
+  // sharp runs on libuv’s thread pool (4 threads by default), which caps files
+  // in flight regardless of the limiter; this must happen before the first
+  // asynchronous I/O and respects a user setting
+  process.env.UV_THREADPOOL_SIZE ??= String(desiredFileConcurrency)
   try {
     sharp.concurrency(perTaskThreads)
   } catch {

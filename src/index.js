@@ -1,12 +1,13 @@
 // This file, which had been forked from imagemin-merlin, was modified for image-guard: https://github.com/sumcumo/imagemin-merlin/compare/master...j9t:master
 
-import { globby, convertPathToPattern } from 'globby'
+import { glob, convertPathToPattern } from 'tinyglobby'
 import { simpleGit } from 'simple-git'
 import { parseArgs, styleText } from 'node:util'
 import fsSync from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
+import { createGitignoreFilter } from './gitignore.js'
 import { styleStderr, utils } from './utils.js'
 
 // Files to be compressed
@@ -147,8 +148,14 @@ Options:
     })
   }
 
-  const desiredFileConcurrency = Math.min(os.cpus().length, 4)
-  const perTaskThreads = Math.max(1, Math.floor(os.cpus().length / Math.max(1, desiredFileConcurrency)))
+  // Capped to bound memory, as each file in flight holds its decoded pixels
+  const desiredFileConcurrency = Math.min(os.availableParallelism(), 8)
+  const perTaskThreads = Math.max(1, Math.floor(os.availableParallelism() / desiredFileConcurrency))
+
+  // sharp runs on libuv’s thread pool (4 threads by default), which caps files
+  // in flight regardless of the limiter; this must happen before the first
+  // asynchronous I/O and respects a user setting
+  process.env.UV_THREADPOOL_SIZE ??= String(desiredFileConcurrency)
   try {
     sharp.concurrency(perTaskThreads)
   } catch {
@@ -194,7 +201,7 @@ Options:
   }
 
   // Plain patterns also get a “/**” variant so directories are excluded with
-  // their contents: “dir/” resolves only where globby can stat it, and a bare
+  // their contents: “dir/” resolves only where tinyglobby can stat it, and a bare
   // “dir” only covers what the walk descends into
   const getIgnorePatterns = (ignore) => {
     return (ignore || '')
@@ -223,14 +230,14 @@ Options:
   // lookup are relative to the searched directory, not to the shell’s—and the
   // results are rejoined for display and file access
   const findFiles = async (patterns, options = {}) => {
-    const files = await globby(patterns, {
+    const files = await glob(patterns, {
       cwd: dir,
-      gitignore: true,
       onlyFiles: true,
       caseSensitiveMatch: false,
       ...options
     })
-    return files.map(file => path.join(dir, file))
+    const isGitignored = createGitignoreFilter(dir)
+    return files.map(file => path.join(dir, file)).filter(file => !isGitignored(path.resolve(file)))
   }
 
   const filterStagedFiles = async (stagedFiles, types) => {
@@ -240,12 +247,13 @@ Options:
 
     if (ignoreList.length > 0) {
       const escapedPaths = byExt.map(p => convertPathToPattern(p))
-      return globby([...escapedPaths, ...ignoreList], {
-        gitignore: true,
+      const files = await glob([...escapedPaths, ...ignoreList], {
         expandDirectories: false,
         onlyFiles: true,
         caseSensitiveMatch: false
       })
+      const isGitignored = createGitignoreFilter('.')
+      return files.filter(file => !isGitignored(path.resolve(file)))
     }
     return byExt
   }

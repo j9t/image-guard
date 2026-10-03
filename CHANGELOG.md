@@ -4,6 +4,19 @@ Starting with version 5.2.0, all notable changes to Image Guard are documented i
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.4.2] - 2026-10-03
+
+### Added
+
+* Added a benchmark (`npm run benchmark`) that times runs on a sample of local images, compares them with a saved baseline, and optionally profiles formats and files
+
+### Changed
+
+* Replaced globby with tinyglobby and ignore, removing the dependency on braces (GHSA-vfj7-8cjw-p6xm), which has no fixed release
+* Sped up compression by up to around 35% by processing up to 8 files in parallel (previously capped at 4 by the default libuv thread pool)
+* Declared Node.js 22.13 as the minimum version (`engines`)
+* Extended test coverage for .gitignore rules from parent directories
+
 ## [5.4.1] - 2026-09-24
 
 ### Changed

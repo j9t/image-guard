@@ -56,7 +56,18 @@ export function createCache(dirStart, fingerprint) {
       return hits
     },
     save() {
-      if (added.length === 0) return
+      if (added.length === 0) {
+        // Keeps runs with other settings from deleting a record that’s still in use
+        if (hits > 0) {
+          try {
+            const now = new Date()
+            fs.utimesSync(fileRecord, now, now)
+          } catch {
+            // Best-effort—at worst, the images are processed once more
+          }
+        }
+        return
+      }
       try {
         fs.mkdirSync(dirCache, { recursive: true })
         // Appending (rather than rewriting) keeps what concurrent runs add

@@ -923,6 +923,16 @@ describe('Image Guard', () => {
       assert.doesNotMatch(stdout, /Could not/)
     })
 
+    test('Marks the record as used when a run only skips images', () => {
+      run([tempTestFolder])
+      const [fileRecord] = fs.readdirSync(dirCache).map(name => path.join(dirCache, name))
+      const timeOld = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
+      fs.utimesSync(fileRecord, timeOld, timeOld)
+      run([tempTestFolder])
+
+      assert.ok(fs.statSync(fileRecord).mtimeMs > timeOld.getTime(), 'The record should count as recently used')
+    })
+
     test('Keeps the record in the project’s node_modules/.cache', () => {
       fs.writeFileSync(path.join(tempDir, 'package.json'), '{}\n')
       fs.mkdirSync(path.join(tempDir, 'node_modules'))

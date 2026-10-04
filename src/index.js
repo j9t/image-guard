@@ -7,6 +7,7 @@ import fsSync from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
+import { createCache } from './cache.js'
 import { createGitignoreFilter } from './gitignore.js'
 import { styleStderr, utils } from './utils.js'
 
@@ -31,6 +32,7 @@ export async function runImageGuard() {
     quiet: { type: 'boolean', short: 'q', default: false },
     dry: { type: 'boolean', short: 'd', default: false },
     staged: { type: 'boolean', default: false },
+    'no-cache': { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
     version: { type: 'boolean', short: 'V', default: false }
   }
@@ -59,6 +61,7 @@ Options:
   -q, --quiet           Print only the final summary
   -d, --dry             Show what would change without writing any files
       --staged          Process only images staged in Git (not combinable with a directory)
+      --no-cache        Process images even if recorded as already processed
   -h, --help            Show this help
   -V, --version         Show the version number`)
     return
@@ -89,11 +92,20 @@ Options:
     throw setupError(`Not a directory: ${dir}`)
   }
 
+  // Remembers images that can’t be compressed further, so later runs can skip them
+  const cache = argv['no-cache'] ? undefined : createCache(argv.staged ? '.' : dir, utils.fingerprint)
+
+  const noteCached = () => {
+    const hits = cache?.hits ?? 0
+    if (hits === 0) return ''
+    return hits === 1 ? ' 1 image was skipped as already processed.' : ` ${hits} images were skipped as already processed.`
+  }
+
   // Share status
   const summary = (run, includesConversion = false) => {
     if (run) {
       const action = includesConversion ? 'compression and conversion' : 'compression'
-      console.info(styleText(['bold'], `\nDefensive base ${action} completed. You saved ${utils.sizeReadable(savedKB)}.`))
+      console.info(styleText(['bold'], `\nDefensive base ${action} completed. You saved ${utils.sizeReadable(savedKB)}.${noteCached()}`))
     } else {
       const what = includesConversion ? 'images to compress or convert' : 'images to compress'
       console.info(styleText(['bold'], `There were no ${what}.`))
@@ -181,7 +193,7 @@ Options:
   const compress = async (files, dry) => {
     if (files.length === 0) return false
 
-    const tasks = files.map(file => limit(() => utils.compression(file, dry, argv.quiet)))
+    const tasks = files.map(file => limit(() => utils.compression(file, dry, argv.quiet, cache)))
     const results = await Promise.allSettled(tasks)
 
     const { hadFailures, addedKB } = processResults(results)
@@ -309,11 +321,13 @@ Options:
     }
   }
 
+  if (!argv.dry) cache?.save()
+
   if (hadFailures) {
     process.exitCode = 1
     if (totalFiles > 0) {
       const action = doConversion ? 'compression and conversion' : 'compression'
-      const savings = savedKB > 0 ? ` You saved ${utils.sizeReadable(savedKB)}.` : ''
+      const savings = `${savedKB > 0 ? ` You saved ${utils.sizeReadable(savedKB)}.` : ''}${noteCached()}`
       console.info(styleText(['bold'], `\nDefensive base ${action} partially completed (some tasks failed).${savings}`))
     } else {
       summary(false, doConversion)

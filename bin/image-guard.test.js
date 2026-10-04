@@ -872,6 +872,15 @@ describe('Image Guard', () => {
       assert.doesNotMatch(stdout, /test\.png \(already processed\)/)
     })
 
+    test('Processes recorded content again under an extension for another format', () => {
+      run([tempTestFolder])
+      fs.copyFileSync(path.join(tempTestFolder, 'test.png'), path.join(tempTestFolder, 'test-png.webp'))
+      const stdout = run([tempTestFolder])
+
+      assert.match(stdout, /test\.png \(already processed\)/)
+      assert.doesNotMatch(stdout, /test-png\.webp \(already processed\)/)
+    })
+
     test('Processes all images with `--no-cache`', () => {
       run([tempTestFolder])
       const stdout = run(['--no-cache', tempTestFolder])
@@ -887,6 +896,8 @@ describe('Image Guard', () => {
     })
 
     test('Ignores records made with other compression settings', () => {
+      // test.JPEG duplicates test.jpg, which the run would rightly skip once the other is processed
+      fs.rmSync(path.join(tempTestFolder, 'test.JPEG'))
       run([tempTestFolder])
       const [fileRecord] = fs.readdirSync(dirCache)
       fs.renameSync(path.join(dirCache, fileRecord), path.join(dirCache, `other-${fileRecord}`))

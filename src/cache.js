@@ -22,32 +22,32 @@ export function findDirCache(dirStart) {
   return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'image-guard')
 }
 
-// Remembers the content hashes of images that compression can’t shrink any
-// further; the fingerprint keeps records apart per compression settings and
-// encoder version, so changing either processes all images again
+// Remembers images that compression can’t shrink any further (as format and
+// content hash); the fingerprint keeps records apart per compression settings
+// and encoder version, so changing either processes all images again
 export function createCache(dirStart, fingerprint) {
   const dirCache = findDirCache(dirStart)
   const fileRecord = path.join(dirCache, `${fingerprint}.txt`)
   const added = []
-  let hashes = new Set()
+  let entries = new Set()
   let hits = 0
 
   try {
-    hashes = new Set(fs.readFileSync(fileRecord, 'utf8').split('\n').filter(Boolean))
+    entries = new Set(fs.readFileSync(fileRecord, 'utf8').split('\n').filter(Boolean))
   } catch (err) {
     if (err.code !== 'ENOENT') console.warn(styleStderr('yellow', `Could not read the record of processed images (${err.message})`))
   }
 
   return {
-    has(hashFile) {
-      const found = hashes.has(hashFile)
+    has(entry) {
+      const found = entries.has(entry)
       if (found) hits++
       return found
     },
-    add(hashFile) {
-      if (hashes.has(hashFile)) return
-      hashes.add(hashFile)
-      added.push(hashFile)
+    add(entry) {
+      if (entries.has(entry)) return
+      entries.add(entry)
+      added.push(entry)
     },
     get hits() {
       return hits
@@ -57,7 +57,7 @@ export function createCache(dirStart, fingerprint) {
       try {
         fs.mkdirSync(dirCache, { recursive: true })
         // Appending (rather than rewriting) keeps what concurrent runs add
-        fs.appendFileSync(fileRecord, added.map(hashFile => `${hashFile}\n`).join(''))
+        fs.appendFileSync(fileRecord, added.map(entry => `${entry}\n`).join(''))
         for (const name of fs.readdirSync(dirCache)) {
           const file = path.join(dirCache, name)
           if (file !== fileRecord && name.endsWith('.txt') && Date.now() - fs.statSync(file).mtimeMs > MAX_AGE_STALE) {

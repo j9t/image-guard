@@ -108,9 +108,12 @@ const compression = async (filename, dry, quiet = false, cache) => {
       throw new Error(`Unsupported file type for ${filename}`)
     }
 
+    // The format follows the extension
+    const toEntry = (data) => `${outputFormat}:${hash(data)}`
+
     const input = await fs.readFile(filename)
-    const hashInput = cache ? hash(input) : undefined
-    if (cache?.has(hashInput)) {
+    const entryInput = cache ? toEntry(input) : undefined
+    if (cache?.has(entryInput)) {
       logMessage(`Skipped ${filename} (already processed)`, dry, 'white', quiet)
       return 0
     }
@@ -158,7 +161,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
     // Records the file as it now is, so compressed results aren’t re-encoded again either
     if (!dry) {
-      cache?.add(fileSizeAfter < fileSizeBefore ? hash(output) : hashInput)
+      cache?.add(fileSizeAfter < fileSizeBefore ? toEntry(output) : entryInput)
     }
 
     logMessage(`${status} ${filename} (${details})`, dry, color, quiet)

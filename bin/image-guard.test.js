@@ -906,6 +906,23 @@ describe('Image Guard', () => {
       assert.doesNotMatch(stdout, /already processed/)
     })
 
+    test('Deletes outdated records but no other files', () => {
+      fs.mkdirSync(dirCache, { recursive: true })
+      const fileStale = path.join(dirCache, '0123456789abcdef.txt')
+      const fileOther = path.join(dirCache, 'notes.txt')
+      const timeOld = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
+      for (const file of [fileStale, fileOther]) {
+        fs.writeFileSync(file, '')
+        fs.utimesSync(file, timeOld, timeOld)
+      }
+      const stdout = run([tempTestFolder])
+
+      assert.strictEqual(fs.existsSync(fileStale), false)
+      assert.strictEqual(fs.existsSync(fileOther), true)
+      assert.strictEqual(fs.readdirSync(dirCache).length, 2, 'The current record should be kept, too')
+      assert.doesNotMatch(stdout, /Could not/)
+    })
+
     test('Keeps the record in the project’s node_modules/.cache', () => {
       fs.writeFileSync(path.join(tempDir, 'package.json'), '{}\n')
       fs.mkdirSync(path.join(tempDir, 'node_modules'))

@@ -6,6 +6,9 @@ import { styleStderr } from './utils.js'
 // Records made with other settings or encoder versions are deleted once unused for this long
 const MAX_AGE_STALE = 30 * 24 * 60 * 60 * 1000
 
+// Matches record files only, as the folder may be shared (see `IMAGE_GUARD_CACHE_DIR`)
+const PATTERN_RECORD = /^[0-9a-f]{16}\.txt$/
+
 // The nearest project’s node_modules/.cache, else the per-user cache folder
 export function findDirCache(dirStart) {
   if (process.env.IMAGE_GUARD_CACHE_DIR) return path.resolve(process.env.IMAGE_GUARD_CACHE_DIR)
@@ -58,14 +61,25 @@ export function createCache(dirStart, fingerprint) {
         fs.mkdirSync(dirCache, { recursive: true })
         // Appending (rather than rewriting) keeps what concurrent runs add
         fs.appendFileSync(fileRecord, added.map(entry => `${entry}\n`).join(''))
-        for (const name of fs.readdirSync(dirCache)) {
-          const file = path.join(dirCache, name)
-          if (file !== fileRecord && name.endsWith('.txt') && Date.now() - fs.statSync(file).mtimeMs > MAX_AGE_STALE) {
-            fs.rmSync(file, { force: true })
-          }
-        }
       } catch (err) {
         console.warn(styleStderr('yellow', `Could not save the record of processed images (${err.message})`))
+        return
+      }
+      let names = []
+      try {
+        names = fs.readdirSync(dirCache)
+      } catch {
+        // Nothing to clean up if the folder can’t be read
+      }
+      for (const name of names) {
+        const file = path.join(dirCache, name)
+        if (file === fileRecord || !PATTERN_RECORD.test(name)) continue
+        try {
+          if (Date.now() - fs.statSync(file).mtimeMs > MAX_AGE_STALE) fs.rmSync(file)
+        } catch (err) {
+          // Another run may have deleted it already
+          if (err.code !== 'ENOENT') console.warn(styleStderr('yellow', `Could not delete outdated record ${file} (${err.message})`))
+        }
       }
     }
   }

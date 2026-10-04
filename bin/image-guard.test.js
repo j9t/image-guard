@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { execFileSync, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { test, describe, before, after } from 'node:test'
+import { test, describe, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert'
 import { simpleGit } from 'simple-git'
 import { fileTypes as allowedFileTypes } from '../src/index.js'
@@ -13,6 +13,10 @@ const __dirname = path.dirname(__filename)
 const testFolder = path.join(__dirname, '../media/test')
 const testFolderGit = path.join(__dirname, '../media/test-git')
 const imageGuardScript = path.join(__dirname, '../bin/image-guard.js')
+
+// Keeps every run from reading or writing the real record of processed images
+const dirCache = path.join(os.tmpdir(), `image-guard-cache-${process.pid}`)
+process.env.IMAGE_GUARD_CACHE_DIR = dirCache
 
 // Function to copy files
 function copyFiles(srcDir, destDir) {
@@ -81,11 +85,17 @@ describe('Image Guard', () => {
     copyFiles(testFolder, testFolderGit)
   })
 
+  // Each test starts without a record, so earlier tests can’t make it skip images
+  beforeEach(() => {
+    fs.rmSync(dirCache, { recursive: true, force: true })
+  })
+
   after(() => {
     // Clean up temporary directory
     if (fs.existsSync(testFolderGit)) {
       fs.rmSync(testFolderGit, { recursive: true, force: true })
     }
+    fs.rmSync(dirCache, { recursive: true, force: true })
   })
 
   test('Compresses images', () => {
@@ -794,5 +804,116 @@ describe('Image Guard', () => {
     assert.strictEqual(after.size, before.size, `${target} should be untouched`)
     assert.strictEqual(after.mtime.getTime(), before.mtime.getTime())
     assert.ok(shrunkCount >= 1, 'Expected at least one non-ignored file to be compressed')
+  })
+
+  describe('Record of processed images', () => {
+    const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const run = (args, options = {}) => execFileSync(process.execPath, [imageGuardScript, ...args], { encoding: 'utf8', cwd: os.tmpdir(), ...options })
+
+    // Environment without the test override, so Image Guard picks the folder itself
+    const envWithoutOverride = (extra = {}) => {
+      const env = { ...process.env, ...extra }
+      delete env.IMAGE_GUARD_CACHE_DIR
+      return env
+    }
+
+    let tempDir
+    let tempTestFolder
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-record-'))
+      tempTestFolder = path.join(tempDir, 'test')
+      copyFiles(testFolder, tempTestFolder)
+    })
+
+    after(() => {
+      if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    test('Skips images processed in an earlier run', () => {
+      run([tempTestFolder])
+      const stdout = run([tempTestFolder])
+
+      const candidates = fs.readdirSync(tempTestFolder).filter(isIgnoreCandidate)
+      assert.ok(candidates.length > 0)
+      for (const file of candidates) {
+        assert.match(stdout, new RegExp(`Skipped .*${escapeRegExp(file)} \\(already processed\\)`))
+      }
+      assert.doesNotMatch(stdout, /Compressed/)
+      assert.match(stdout, new RegExp(`${candidates.length} images were skipped as already processed\\.`))
+    })
+
+    test('Skips staged images processed in an earlier run', async () => {
+      const git = simpleGit(tempTestFolder)
+      await git.init()
+      await git.add('.')
+      run(['--staged'], { cwd: tempTestFolder })
+      const stdout = run(['--staged'], { cwd: tempTestFolder })
+
+      const candidates = fs.readdirSync(tempTestFolder).filter(isIgnoreCandidate)
+      for (const file of candidates) {
+        assert.match(stdout, new RegExp(`Skipped .*${escapeRegExp(file)} \\(already processed\\)`))
+      }
+      assert.doesNotMatch(stdout, /Compressed/)
+    })
+
+    test('Does not record corrupt files', () => {
+      run([tempTestFolder])
+      const stdout = run([tempTestFolder])
+
+      assert.match(stdout, /Skipped.*test#corrupt\.gif.*corrupt file/i)
+    })
+
+    test('Processes a recorded image again once it changes', () => {
+      run([tempTestFolder])
+      fs.copyFileSync(path.join(testFolder, 'test.png'), path.join(tempTestFolder, 'test.png'))
+      const stdout = run([tempTestFolder])
+
+      assert.match(stdout, /Compressed .*test\.png/)
+      assert.doesNotMatch(stdout, /test\.png \(already processed\)/)
+    })
+
+    test('Processes all images with `--no-cache`', () => {
+      run([tempTestFolder])
+      const stdout = run(['--no-cache', tempTestFolder])
+
+      assert.doesNotMatch(stdout, /already processed/)
+      assert.strictEqual(fs.existsSync(dirCache), true, 'The record from the first run should be kept')
+    })
+
+    test('Does not write the record in dry runs', () => {
+      run(['--dry', tempTestFolder])
+
+      assert.strictEqual(fs.existsSync(dirCache), false)
+    })
+
+    test('Ignores records made with other compression settings', () => {
+      run([tempTestFolder])
+      const [fileRecord] = fs.readdirSync(dirCache)
+      fs.renameSync(path.join(dirCache, fileRecord), path.join(dirCache, `other-${fileRecord}`))
+      const stdout = run([tempTestFolder])
+
+      assert.doesNotMatch(stdout, /already processed/)
+    })
+
+    test('Keeps the record in the project’s node_modules/.cache', () => {
+      fs.writeFileSync(path.join(tempDir, 'package.json'), '{}\n')
+      fs.mkdirSync(path.join(tempDir, 'node_modules'))
+      run([tempTestFolder], { env: envWithoutOverride() })
+
+      const dirRecord = path.join(tempDir, 'node_modules', '.cache', 'image-guard')
+      assert.strictEqual(fs.readdirSync(dirRecord).length, 1)
+    })
+
+    test('Falls back to the per-user cache folder without node_modules', () => {
+      const dirHome = path.join(tempDir, 'home')
+      const dirLocalAppData = path.join(dirHome, 'AppData', 'Local')
+      run([tempTestFolder], { env: envWithoutOverride({ HOME: dirHome, USERPROFILE: dirHome, LOCALAPPDATA: dirLocalAppData, XDG_CACHE_HOME: '' }) })
+
+      const dirRecord = {
+        darwin: path.join(dirHome, 'Library', 'Caches', 'image-guard'),
+        win32: path.join(dirLocalAppData, 'image-guard', 'Cache')
+      }[process.platform] ?? path.join(dirHome, '.cache', 'image-guard')
+      assert.strictEqual(fs.readdirSync(dirRecord).length, 1)
+    })
   })
 })

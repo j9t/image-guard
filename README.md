@@ -121,6 +121,8 @@ Image Guard takes an optional path to the directory to process—`npx image-guar
 
 * `--staged` (recommended with automated use) triggers a mode that watches PNG, JPG, GIF, WebP, and AVIF files (and HEIC/HEIF, when `--heic-to-avif` is used) from staged changes (`git diff --cached`) and only processes those files—that approach makes Image Guard more efficient in operation. Because the file set comes from Git, `--staged` can’t be combined with a path.
 
+* `--no-cache` processes all images, including those recorded as already processed (see [“Record of Processed Images”](#record-of-processed-images)).
+
 * `--help`/`-h` lists the arguments and options.
 
 * `--version`/`-V` prints the version number.
@@ -146,11 +148,17 @@ Automated compression works by monitoring whether a given [change list](https://
 
 Through this approach, though glossed over here, Image Guard makes up for what’s missing or complicated in other packages, namely easy, near-riskless, automatable, resource-friendly in-repo optimization.
 
+### Record of Processed Images
+
+To keep repeat runs fast, Image Guard remembers which images it has already processed (compressed, or found not to shrink any further) by their content, and skips them in later runs. This also protects JPG and GIF images from being re-encoded over and over. An image is processed again as soon as its content changes, and all images are when the compression settings or the underlying image libraries change (as through an update).
+
+The record is kept in node_modules/.cache/image-guard of the project being processed, or—where there is no node_modules folder, as is common with `npx`—in the per-user cache folder (~/Library/Caches/image-guard on macOS, %LOCALAPPDATA%\image-guard\Cache on Windows, and ~/.cache/image-guard elsewhere). The `IMAGE_GUARD_CACHE_DIR` environment variable sets a different folder—for example, to persist the record in CI. Deleting the folder, or using `--no-cache`, makes Image Guard process all images again.
+
 ## Why Use Image Guard?
 
 You use Image Guard when you need a simple, automatable, robust solution to compress images in a way that limits unnecessary image payload right from the start, in your repositories, and that reduces the risk that entirely uncompressed images go into production.
 
-As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. (Lossless compression is not possible for every image format, however, so there’s a risk when excessively iterating over the same images. Doing so may eventually degrade quality.)
+As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. (Lossless compression is not possible for every image format, however, so there’s a risk when excessively iterating over the same images. Doing so may eventually degrade quality. The [record of processed images](#record-of-processed-images) prevents this, unless it’s bypassed or cleared.)
 
 ## What Does Image Guard _Not_ Do?
 
@@ -168,7 +176,7 @@ To check how a change affects speed, memory, and compression, run the benchmark 
 npm run benchmark -- ~/Projects
 ```
 
-The benchmark copies a deterministic sample of the images (honoring .gitignore) to a temporary folder, runs Image Guard on fresh copies of it several times, and reports the median time, peak memory, and bytes saved. Your images are not modified.
+The benchmark copies a deterministic sample of the images (honoring .gitignore) to a temporary folder, runs Image Guard on fresh copies of it several times (each without a record of processed images), and reports the median time, peak memory, and bytes saved. Your images are not modified.
 
 * `--runs <n>` sets the number of runs (default: 3).
 * `--sample <n>` sets the approximate sample size (default: 300). Each format is sampled in proportion to its share, with at least 10 files per format where available.

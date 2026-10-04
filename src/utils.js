@@ -1,5 +1,6 @@
 // This file, which had been forked from imagemin-merlin, was modified for image-guard: https://github.com/sumcumo/imagemin-merlin/compare/master...j9t:master
 
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -7,6 +8,42 @@ import { styleText } from 'node:util'
 import decode from 'heic-decode'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100 MB
+
+// Compression configuration for each format (as sharp names them)
+const formatConfigs = {
+  jpeg: {
+    options: {},
+    settings: { quality: 100 }
+  },
+  png: {
+    options: { pages: -1 },
+    settings: { animated: true, compressionLevel: 9, quality: 100 } // Still waiting for APNG support though (`animated` doesn’t seem to have an effect), https://github.com/lovell/sharp/issues/2375
+  },
+  gif: {
+    options: { pages: -1 },
+    settings: {
+      reuse: true,               // Preserve original palette for lossless quality (default)
+      effort: 10,                // Maximum compression effort
+      dither: 0,                 // No dithering = lossless quality
+      interFrameMaxError: 0,     // No transparency errors = lossless (default)
+      interPaletteMaxError: 0,   // Perfect palette match = lossless
+      colors: 256                // Full palette available (default)
+    }
+  },
+  webp: {
+    options: { pages: -1 },
+    settings: { animated: true, lossless: true }
+  },
+  avif: {
+    options: {},
+    settings: { effort: 5, lossless: true } // Temporarily specifying effort, too, as per https://github.com/lovell/sharp/issues/4370#issuecomment-2798848572
+  }
+}
+
+export const hash = (data) => createHash('sha256').update(data).digest('hex')
+
+// Identifies what compression results depend on, to tell when recorded results no longer apply
+const fingerprint = hash(JSON.stringify({ formatConfigs, versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects
@@ -34,7 +71,7 @@ const retryFileOperation = async (operation, maxRetries = 5, delayMs = 100) => {
   }
 }
 
-const compression = async (filename, dry, quiet = false) => {
+const compression = async (filename, dry, quiet = false, cache) => {
   const filenameBackup = `${filename}.bak`
   const fileSizeBefore = await size(filename)
   // Track whether original file was successfully replaced
@@ -66,48 +103,25 @@ const compression = async (filename, dry, quiet = false) => {
     }
 
     const outputFormat = ext === 'jpg' ? 'jpeg' : ext // sharp uses “jpeg” instead of “jpg”
-
-    // Compression configuration for each format
-    const formatConfigs = {
-      png: {
-        options: { pages: -1 },
-        settings: { animated: true, compressionLevel: 9, quality: 100 } // Still waiting for APNG support though (`animated` doesn’t seem to have an effect), https://github.com/lovell/sharp/issues/2375
-      },
-      gif: {
-        options: { pages: -1 },
-        settings: {
-          reuse: true,               // Preserve original palette for lossless quality (default)
-          effort: 10,                // Maximum compression effort
-          dither: 0,                 // No dithering = lossless quality
-          interFrameMaxError: 0,     // No transparency errors = lossless (default)
-          interPaletteMaxError: 0,   // Perfect palette match = lossless
-          colors: 256                // Full palette available (default)
-        }
-      },
-      webp: {
-        options: { pages: -1 },
-        settings: { animated: true, lossless: true }
-      },
-      avif: {
-        options: {},
-        settings: { effort: 5, lossless: true } // Temporarily specifying effort, too, as per https://github.com/lovell/sharp/issues/4370#issuecomment-2798848572
-      }
-    }
-
-    // Apply format-specific compression or use default
     const config = formatConfigs[outputFormat]
-    if (config) {
-      await sharp(filename, config.options)
-        .toFormat(outputFormat, config.settings)
-        .toFile(tempFilePath)
-    } else {
-      // Fallback for any other supported formats (like JPG)
-      await sharp(filename)
-        .toFormat(outputFormat, { quality: 100 })
-        .toFile(tempFilePath)
+    if (!config) {
+      throw new Error(`Unsupported file type for ${filename}`)
     }
 
-    const fileSizeAfter = await size(tempFilePath)
+    const input = await fs.readFile(filename)
+    const hashInput = cache ? hash(input) : undefined
+    if (cache?.has(hashInput)) {
+      logMessage(`Skipped ${filename} (already processed)`, dry, 'white', quiet)
+      return 0
+    }
+
+    const output = await sharp(input, config.options)
+      .toFormat(outputFormat, config.settings)
+      .toBuffer()
+    const fileSizeAfter = output.length
+    if (fileSizeAfter === 0) {
+      throw new Error('Compressed file size is 0')
+    }
 
     let color = 'white'
     let status = 'Skipped'
@@ -120,6 +134,7 @@ const compression = async (filename, dry, quiet = false) => {
       if (!dry) {
         // Only now create a backup and replace the original
         await retryFileOperation(() => fs.copyFile(filename, filenameBackup))
+        await fs.writeFile(tempFilePath, output)
         // Prefer atomic rename when possible
         try {
           await retryFileOperation(() => fs.rename(tempFilePath, filename))
@@ -141,14 +156,15 @@ const compression = async (filename, dry, quiet = false) => {
       details = 'already compressed more effectively'
     }
 
+    // Records the file as it now is, so compressed results aren’t re-encoded again either
+    if (!dry) {
+      cache?.add(fileSizeAfter < fileSizeBefore ? hash(output) : hashInput)
+    }
+
     logMessage(`${status} ${filename} (${details})`, dry, color, quiet)
 
     if (dry) {
-      return 0 // Temp file cleaned up in finally
-    }
-
-    if (fileSizeAfter === 0) {
-      console.error(styleStderr('red', `Error compressing ${filename}: Compressed file size is 0`))
+      return 0
     }
 
     return fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
@@ -174,7 +190,7 @@ const compression = async (filename, dry, quiet = false) => {
 
   } finally {
 
-    // Clean up temp file if it wasn’t consumed (covers dry-run, error, and no-improvement paths)
+    // Clean up temp file if it wasn’t consumed (covers error paths)
     if (!tempConsumed) {
       try {
         await retryFileOperation(() => fs.unlink(tempFilePath))
@@ -290,4 +306,4 @@ const size = async (file) => {
 
 const sizeReadable = (size) => `${(size / 1024).toFixed(2)} KB` // eslint-disable-line no-irregular-whitespace
 
-export const utils = { compression, conversion, sizeReadable }
+export const utils = { compression, conversion, sizeReadable, fingerprint }

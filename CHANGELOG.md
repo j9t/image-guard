@@ -4,6 +4,22 @@ Starting with version 5.2.0, all notable changes to Image Guard are documented i
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.5.0] - 2026-10-04
+
+### Fixed
+
+* Ensured an empty compression result can’t replace the original image
+
+### Added
+
+* Added a record of processed images (by content hash), so repeat runs skip images that are already compressed and finish in a fraction of the time (around 10× faster on a sample of 250 images); the record lives in node_modules/.cache/image-guard, falls back to the per-user cache folder (as with `npx`), and can be placed elsewhere through `IMAGE_GUARD_CACHE_DIR`
+* Added `--no-cache` to process all images regardless of the record
+
+### Changed
+
+* Kept JPG and GIF images from being re-encoded on every run, through that record
+* Limited temporary files to images that actually get replaced
+
 ## [5.4.2] - 2026-10-03
 
 ### Added

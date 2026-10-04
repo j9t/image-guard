@@ -73,10 +73,13 @@ export const formatDelta = (current, baseline) => {
 const dirSize = (dir) => fs.readdirSync(dir).reduce((sum, file) => sum + fs.statSync(path.join(dir, file)).size, 0)
 
 function runImageGuard(dirCorpus, dirWork) {
+  // Each run starts without a record of processed images, as on a first run
+  const dirCache = `${dirWork}-cache`
   fs.rmSync(dirWork, { recursive: true, force: true })
+  fs.rmSync(dirCache, { recursive: true, force: true })
   fs.cpSync(dirCorpus, dirWork, { recursive: true })
   const start = performance.now()
-  const run = spawnSync(process.execPath, ['--import', hookPeakMemory, scriptImageGuard, '-q', dirWork], { encoding: 'utf8' })
+  const run = spawnSync(process.execPath, ['--import', hookPeakMemory, scriptImageGuard, '-q', dirWork], { encoding: 'utf8', env: { ...process.env, IMAGE_GUARD_CACHE_DIR: dirCache } })
   const time = (performance.now() - start) / 1000
   // The child shares the terminal, so Ctrl + C stops it, too
   if (run.signal) throw Object.assign(new Error(`Interrupted (${run.signal})`), { signal: run.signal })

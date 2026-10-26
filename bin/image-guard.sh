@@ -12,4 +12,13 @@ if ! command -v node > /dev/null 2>&1; then
   echo "Image Guard: Node not found. Install Node.js via nvm, Volta, asdf, mise, or Homebrew." >&2
   exit 1
 fi
-exec node "$(dirname "$0")/../image-guard/bin/image-guard.js" "$@"
+# Follows symlinks (as from node_modules/.bin or a global bin folder) to this script’s own folder
+self="$0"
+while [ -L "$self" ]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *) self="$(dirname "$self")/$target" ;;
+  esac
+done
+exec node "$(dirname "$self")/image-guard.js" "$@"

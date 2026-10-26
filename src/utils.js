@@ -16,8 +16,10 @@ const formatConfigs = {
     settings: { quality: 100 }
   },
   png: {
-    options: { pages: -1 },
-    settings: { animated: true, compressionLevel: 9, quality: 100 } // Still waiting for APNG support though (`animated` doesn’t seem to have an effect), https://github.com/lovell/sharp/issues/2375
+    options: {},
+    settings: { compressionLevel: 9 },
+    // Lossless only for images that already use a palette, as quantization reduces others to 256 colors
+    settingsPalette: { palette: true, quality: 100, dither: 0, effort: 10 }
   },
   gif: {
     options: { pages: -1 },
@@ -40,10 +42,50 @@ const formatConfigs = {
   }
 }
 
+// Checks the profile description, as sRGB profiles only add bytes (sRGB being
+// what images without a profile are taken to be)
+const isSrgbProfile = (icc) => {
+  try {
+    const count = icc.readUInt32BE(128)
+    for (let i = 0; i < count; i++) {
+      const entry = 132 + i * 12
+      if (icc.toString('latin1', entry, entry + 4) !== 'desc') continue
+      const offset = icc.readUInt32BE(entry + 4)
+      // Removing null bytes covers both ASCII and UTF-16 descriptions
+      return icc.toString('latin1', offset, offset + icc.readUInt32BE(entry + 8)).replaceAll('\0', '').includes('sRGB')
+    }
+  } catch {
+    // Malformed profiles are kept
+  }
+  return false
+}
+
+// Keeps what affects how the image looks—orientation, color profile, CMYK, and
+// high bit depth for AVIF—while dropping all other metadata
+const createPipeline = (input, format, metadata) => {
+  const { options, settings, settingsPalette } = formatConfigs[format]
+  const settingsImage = metadata.isPalette && settingsPalette ? settingsPalette : settings
+  let pipeline = sharp(input, options)
+  if (metadata.icc && !isSrgbProfile(metadata.icc)) pipeline = pipeline.keepIccProfile()
+  if (metadata.orientation > 1) pipeline = pipeline.withExif({ IFD0: { Orientation: String(metadata.orientation) } })
+  if (metadata.space === 'cmyk') pipeline = pipeline.pipelineColourspace('cmyk').toColourspace('cmyk')
+  if (format === 'avif' && metadata.bitsPerSample > 8) {
+    return pipeline.toColourspace(metadata.space).toFormat(format, { ...settingsImage, bitdepth: metadata.bitsPerSample })
+  }
+  return pipeline.toFormat(format, settingsImage)
+}
+
+// Detects APNG images, of which libvips would keep only the first frame
+const isAnimatedPng = (data) => {
+  const actl = data.indexOf('acTL')
+  const idat = data.indexOf('IDAT')
+  return actl !== -1 && (idat === -1 || actl < idat)
+}
+
 export const hash = (data) => createHash('sha256').update(data).digest('hex')
 
 // Identifies what compression results depend on, to tell when recorded results no longer apply
-const fingerprint = hash(JSON.stringify({ formatConfigs, versions: sharp.versions })).slice(0, 16)
+const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [createPipeline, isSrgbProfile].map(String), versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects
@@ -71,6 +113,9 @@ const retryFileOperation = async (operation, maxRetries = 5, delayMs = 100) => {
   }
 }
 
+// Bytes saved, and the paths written or removed (for staging)
+const noChange = () => ({ saved: 0, changed: [] })
+
 const compression = async (filename, dry, quiet = false, cache) => {
   const filenameBackup = `${filename}.bak`
   const fileSizeBefore = await size(filename)
@@ -79,12 +124,12 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
   if (fileSizeBefore === 0) {
     logMessage(`Skipped ${filename} (${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (fileSizeBefore > MAX_FILE_SIZE) {
     logMessage(`Skipped ${filename} (file too large: ${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   // Place temp file next to the original to maximize same-device atomic rename
@@ -103,8 +148,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
     }
 
     const outputFormat = ext === 'jpg' ? 'jpeg' : ext // sharp uses “jpeg” instead of “jpg”
-    const config = formatConfigs[outputFormat]
-    if (!config) {
+    if (!formatConfigs[outputFormat]) {
       throw new Error(`Unsupported file type for ${filename}`)
     }
 
@@ -115,12 +159,15 @@ const compression = async (filename, dry, quiet = false, cache) => {
     const entryInput = cache ? toEntry(input) : undefined
     if (cache?.has(entryInput)) {
       logMessage(`Skipped ${filename} (already processed)`, dry, 'white', quiet)
-      return 0
+      return noChange()
     }
 
-    const output = await sharp(input, config.options)
-      .toFormat(outputFormat, config.settings)
-      .toBuffer()
+    if (outputFormat === 'png' && isAnimatedPng(input)) {
+      logMessage(`Skipped ${filename} (animated PNG)`, dry, 'yellow', quiet)
+      return noChange()
+    }
+
+    const output = await createPipeline(input, outputFormat, await sharp(input).metadata()).toBuffer()
     const fileSizeAfter = output.length
     if (fileSizeAfter === 0) {
       throw new Error('Compressed file size is 0')
@@ -166,11 +213,11 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
     logMessage(`${status} ${filename} (${details})`, dry, color, quiet)
 
-    if (dry) {
-      return 0
+    if (dry || !replacementSucceeded) {
+      return noChange()
     }
 
-    return fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+    return { saved: fileSizeBefore - fileSizeAfter, changed: [filename] }
 
   } catch (err) {
 
@@ -186,10 +233,9 @@ const compression = async (filename, dry, quiet = false, cache) => {
       msg.includes('avifload:')
     ) {
       logMessage(`Skipped ${filename} (corrupt file)`, dry, 'yellow', quiet)
-    } else {
-      console.error(styleStderr('red', `Error compressing ${filename}:`), err)
+      return noChange()
     }
-    return 0
+    throw new Error(`Error compressing ${filename}`, { cause: err })
 
   } finally {
 
@@ -229,17 +275,17 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
   if (fileSizeBefore === 0) {
     logMessage(`Skipped ${filename} (${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (fileSizeBefore > MAX_FILE_SIZE) {
     logMessage(`Skipped ${filename} (file too large: ${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (!/\.hei[cf]$/i.test(filename)) {
     logMessage(`Skipped ${filename} (not a HEIC/HEIF file)`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   const avifPath = filename.replace(/\.hei[cf]$/i, '.avif')
@@ -248,7 +294,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
   try {
     await fs.access(avifPath)
     logMessage(`Skipped ${filename} (${path.basename(avifPath)} already exists)`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   } catch {
     // File does not exist—proceed with conversion
   }
@@ -270,7 +316,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
     if (dry) {
       await retryFileOperation(() => fs.unlink(avifPath))
-      return 0
+      return noChange()
     }
 
     // Delete original HEIC/HEIF file unless `--keep-heic` is set
@@ -278,7 +324,10 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
       await retryFileOperation(() => fs.unlink(filename))
     }
 
-    return fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+    return {
+      saved: fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0,
+      changed: keepOriginal ? [avifPath] : [avifPath, filename]
+    }
 
   } catch (err) {
     // Clean up partial AVIF if it was created
@@ -295,10 +344,9 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
       err.message.includes('HEIF image not found')
     )) {
       logMessage(`Skipped ${filename} (corrupt or unsupported HEIC/HEIF file)`, dry, 'yellow', quiet)
-    } else {
-      console.error(styleStderr('red', `Error converting ${filename}:`), err)
+      return noChange()
     }
-    return 0
+    throw new Error(`Error converting ${filename}`, { cause: err })
   }
 }
 

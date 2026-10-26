@@ -175,18 +175,25 @@ Options:
   }
   const limit = createLimiter(desiredFileConcurrency)
 
-  const processResults = (results) => {
+  // Paths written or removed, by the image they came from
+  const changesBySource = new Map()
+
+  const processResults = (results, files) => {
     let hadFailures = false
     let addedKB = 0
-    for (const r of results) {
+    results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
-        addedKB += r.value
+        addedKB += r.value.saved
+        if (r.value.changed.length) changesBySource.set(files[i], r.value.changed)
       } else {
         hadFailures = true
-        const reason = r.reason && r.reason.message ? r.reason.message : String(r.reason)
-        console.error(styleStderr('red', 'Task failed:'), reason)
+        if (r.reason?.cause) {
+          console.error(styleStderr('red', `${r.reason.message}:`), r.reason.cause)
+        } else {
+          console.error(styleStderr('red', 'Task failed:'), r.reason?.message ?? String(r.reason))
+        }
       }
-    }
+    })
     return { hadFailures, addedKB }
   }
 
@@ -196,7 +203,7 @@ Options:
     const tasks = files.map(file => limit(() => utils.compression(file, dry, argv.quiet, cache)))
     const results = await Promise.allSettled(tasks)
 
-    const { hadFailures, addedKB } = processResults(results)
+    const { hadFailures, addedKB } = processResults(results, files)
     savedKB += addedKB
     return hadFailures
   }
@@ -207,7 +214,7 @@ Options:
     const tasks = files.map(file => limit(() => utils.conversion(file, dry, keepOriginal, argv.quiet)))
     const results = await Promise.allSettled(tasks)
 
-    const { hadFailures, addedKB } = processResults(results)
+    const { hadFailures, addedKB } = processResults(results, files)
     savedKB += addedKB
     return hadFailures
   }
@@ -275,10 +282,14 @@ Options:
   let totalFiles = 0
 
   if (argv.staged) {
-    const git = simpleGit()
     try {
-      const diffOutput = await git.raw(['diff', '--name-only', '--cached', '--diff-filter=ACMRT'])
-      const stagedFiles = diffOutput.split('\n').map(s => s.trim()).filter(Boolean)
+      // Git reports paths relative to the repository root
+      process.chdir((await simpleGit().revparse(['--show-toplevel'])).trim())
+      const git = simpleGit()
+      // `-z` keeps Git from quoting names with non-ASCII characters
+      const listFiles = async (args) => (await git.raw(['diff', '--name-only', '-z', ...args])).split('\0').filter(Boolean)
+      const stagedFiles = await listFiles(['--cached', '--diff-filter=ACMRT'])
+      const unstagedFiles = new Set(await listFiles([]))
 
       // Collect compression and conversion candidates in parallel
       const [compressionFiles, conversionFiles] = await Promise.all([
@@ -293,6 +304,21 @@ Options:
         convert(conversionFiles, argv.dry, argv['keep-heic'])
       ])
       hadFailures = compFailed || convFailed
+
+      // Stages the results so the commit includes them, except where that would
+      // also stage changes the user left unstaged
+      const pathsToStage = []
+      for (const [file, changed] of changesBySource) {
+        if (unstagedFiles.has(file)) {
+          console.warn(styleStderr('yellow', `Didn’t stage ${changed.join(', ')}, as ${file} has unstaged changes`))
+        } else {
+          pathsToStage.push(...changed)
+        }
+      }
+      // Batched to stay within command-line length limits
+      for (let i = 0; i < pathsToStage.length; i += 100) {
+        await git.raw(['add', '--all', '--', ...pathsToStage.slice(i, i + 100).map(p => `:(literal)${p}`)])
+      }
     } catch (err) {
       console.error(err)
       hadFailures = true

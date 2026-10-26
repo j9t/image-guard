@@ -4,6 +4,22 @@ Starting with version 5.2.0, all notable changes to Image Guard are documented i
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.0] - 2026-10-27
+
+### Fixed
+
+* Ensured PNG compression is lossless—true-color images had been reduced to 256 colors, while images that already use a palette keep being compressed as palette images
+* Ensured compression keeps the orientation (EXIF) and color profile of images, the colors of CMYK JPG images, and the bit depth of 10- and 12-bit AVIF images
+* Ensured animated PNGs (APNG) are skipped rather than reduced to their first frame
+* Ensured `--staged` stages the images it compresses or converts (except images with unstaged changes), so the commit includes them
+* Ensured `--staged` processes images with non-ASCII names, and works when run from a subdirectory
+* Ensured errors other than corrupt files make Image Guard exit with an error code
+* Ensured global installs (and other symlinked setups) find Image Guard’s script
+
+### Changed
+
+* Dropped sRGB color profiles, which add bytes without changing how images look
+
 ## [5.5.0] - 2026-10-04
 
 ### Fixed

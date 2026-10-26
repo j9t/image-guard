@@ -6,6 +6,8 @@ on:
     paths-ignore: ["**.md"]
   pull_request:
     paths-ignore: ["**.md"]
+  # @@ Remove once the Windows run on fix/fidelity is confirmed
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,12 +42,27 @@ jobs:
         run: npm run lint
       - name: "Run tests"
         run: npm test
+      - name: "Run as installed package"
+        # Calls the bin through the shim npm generates (a .cmd file on Windows) via the platform’s shell
+        if: matrix.node == 'lts/*'
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          npm pack --pack-destination "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          npm init -y
+          npm install ./image-guard-*.tgz
+          # Not `npx`, which answers `--version` itself when the bin is missing
+          node -e "const out = require('child_process').execSync(require('path').join('node_modules', '.bin', 'image-guard') + ' --version').toString().trim(); if (out !== process.argv[1]) throw new Error('Unexpected output: ' + out)" "$version"
 
-  # sharp and heic-decode ship native binaries
-  test-macos:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    name: "Node lts/* (macOS)"
-    runs-on: macos-latest
+  # sharp and heic-decode ship native binaries, and the bin is a shell script
+  test-platforms:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    strategy:
+      matrix:
+        platform: [macos-latest, windows-latest]
+    name: "Node lts/* (${{ matrix.platform }})"
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v7
@@ -60,3 +77,14 @@ jobs:
         run: npm ci
       - name: "Run tests"
         run: npm test
+      - name: "Run as installed package"
+        # Calls the bin through the shim npm generates (a .cmd file on Windows) via the platform’s shell
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          npm pack --pack-destination "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          npm init -y
+          npm install ./image-guard-*.tgz
+          # Not `npx`, which answers `--version` itself when the bin is missing
+          node -e "const out = require('child_process').execSync(require('path').join('node_modules', '.bin', 'image-guard') + ' --version').toString().trim(); if (out !== process.argv[1]) throw new Error('Unexpected output: ' + out)" "$version"

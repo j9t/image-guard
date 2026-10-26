@@ -1,10 +1,12 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import zlib from 'zlib'
 import { execFileSync, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { test, describe, before, beforeEach, after } from 'node:test'
+import { test, describe, before, beforeEach, after, afterEach } from 'node:test'
 import assert from 'node:assert'
+import sharp from 'sharp'
 import { simpleGit } from 'simple-git'
 import { fileTypes as allowedFileTypes } from '../src/index.js'
 
@@ -953,5 +955,269 @@ describe('Image Guard', () => {
       }[process.platform] ?? path.join(dirHome, '.cache', 'image-guard')
       assert.strictEqual(fs.readdirSync(dirRecord).length, 1)
     })
+  })
+
+  describe('Image fidelity', () => {
+    const run = (args, options = {}) => spawnSync(process.execPath, [imageGuardScript, '--no-cache', ...args], { encoding: 'utf8', ...options })
+    // Reads from buffers, as libvips caches what it reads by path
+    const pixels = (file) => sharp(fs.readFileSync(file)).raw().toBuffer()
+    const metadata = (file) => sharp(fs.readFileSync(file)).metadata()
+
+    // More than 256 colors, to rule out palettes
+    const createPattern = (width = 320, height = 240) => {
+      const data = Buffer.alloc(width * height * 3)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 3
+          data[i] = (x * 3) & 255
+          data[i + 1] = (y * 5) & 255
+          data[i + 2] = ((x ^ y) * 3) & 255
+        }
+      }
+      return sharp(data, { raw: { width, height, channels: 3 } })
+    }
+
+    // Two-frame APNG, which libvips reads as a still image
+    const createApng = (file) => {
+      const crcTable = Array.from({ length: 256 }, (_, n) => {
+        let c = n
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+        return c >>> 0
+      })
+      const crc = (data) => {
+        let c = 0xffffffff
+        for (const byte of data) c = crcTable[(c ^ byte) & 255] ^ (c >>> 8)
+        return (c ^ 0xffffffff) >>> 0
+      }
+      const chunk = (type, data) => {
+        const head = Buffer.alloc(8)
+        head.writeUInt32BE(data.length)
+        head.write(type, 4)
+        const tail = Buffer.alloc(4)
+        tail.writeUInt32BE(crc(Buffer.concat([head.subarray(4), data])))
+        return Buffer.concat([head, data, tail])
+      }
+      const size = 64
+      const frame = (red) => {
+        const rows = []
+        for (let y = 0; y < size; y++) {
+          const row = Buffer.alloc(1 + size * 3)
+          for (let x = 0; x < size; x++) row.set([red ^ x, y, 255 - red], 1 + x * 3)
+          rows.push(row)
+        }
+        return zlib.deflateSync(Buffer.concat(rows), { level: 0 })
+      }
+      const ihdr = Buffer.alloc(13)
+      ihdr.writeUInt32BE(size, 0)
+      ihdr.writeUInt32BE(size, 4)
+      ihdr.set([8, 2], 8)
+      const actl = Buffer.alloc(8)
+      actl.writeUInt32BE(2, 0)
+      const fctl = (sequence) => {
+        const data = Buffer.alloc(26)
+        data.writeUInt32BE(sequence, 0)
+        data.writeUInt32BE(size, 4)
+        data.writeUInt32BE(size, 8)
+        data.writeUInt16BE(1, 20)
+        data.writeUInt16BE(2, 22)
+        return data
+      }
+      const fdat = Buffer.concat([Buffer.alloc(4), frame(0)])
+      fdat.writeUInt32BE(2, 0)
+      fs.writeFileSync(file, Buffer.concat([
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        chunk('IHDR', ihdr),
+        chunk('acTL', actl),
+        chunk('fcTL', fctl(0)),
+        chunk('IDAT', frame(255)),
+        chunk('fcTL', fctl(1)),
+        chunk('fdAT', fdat),
+        chunk('IEND', Buffer.alloc(0))
+      ]))
+    }
+
+    let tempDir
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-fidelity-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    test('Keeps true-color PNG images lossless', async () => {
+      const file = path.join(tempDir, 'truecolor.png')
+      await createPattern().png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*truecolor\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Keeps palette PNG images lossless and compresses them as palette images', async () => {
+      const file = path.join(tempDir, 'palette.png')
+      await createPattern().png({ palette: true, colours: 200, dither: 0, compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*palette\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, true)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    for (const [format, settings, lossless] of [
+      ['jpeg', { quality: 100, chromaSubsampling: '4:4:4', optimiseCoding: false }, false],
+      ['png', { compressionLevel: 0 }, true],
+      ['webp', { lossless: true, effort: 0 }, true],
+      ['avif', { lossless: true, effort: 0 }, true]
+    ]) {
+      test(`Keeps the orientation and color profile of ${format.toUpperCase()} images`, async () => {
+        const file = path.join(tempDir, `meta.${format}`)
+        await createPattern().withMetadata({ orientation: 6 }).withIccProfile('p3').toFormat(format, settings).toFile(file)
+        const { orientation } = await metadata(file)
+        const before = await pixels(file)
+        const { stdout } = run([tempDir])
+        const metadataAfter = await metadata(file)
+
+        assert.match(stdout, new RegExp(`Compressed .*meta\\.${format}`))
+        assert.strictEqual(metadataAfter.orientation, orientation)
+        assert.ok(metadataAfter.icc, 'The color profile should be kept')
+        if (lossless) assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+      })
+    }
+
+    test('Drops sRGB color profiles', async () => {
+      const file = path.join(tempDir, 'srgb.png')
+      await createPattern().withIccProfile('srgb').png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*srgb\.png/)
+      assert.strictEqual((await metadata(file)).icc, undefined)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Keeps the bit depth of AVIF images', async () => {
+      const file = path.join(tempDir, 'deep.avif')
+      await createPattern().toColourspace('rgb16').avif({ lossless: true, bitdepth: 10, effort: 0 }).toFile(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*deep\.avif/)
+      assert.strictEqual((await metadata(file)).bitsPerSample, 10)
+    })
+
+    test('Keeps CMYK JPEG images in CMYK', async () => {
+      const file = path.join(tempDir, 'cmyk.jpg')
+      await createPattern().toColourspace('cmyk').jpeg({ quality: 100, optimiseCoding: false }).toFile(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*cmyk\.jpg/)
+      assert.strictEqual((await metadata(file)).space, 'cmyk')
+    })
+
+    test('Skips animated PNG images', () => {
+      const file = path.join(tempDir, 'animated.png')
+      createApng(file)
+      const before = fs.readFileSync(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Skipped .*animated\.png \(animated PNG\)/)
+      assert.ok(before.equals(fs.readFileSync(file)), 'The file should be unchanged')
+    })
+
+    test('Fails on images it can’t read', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
+      const file = path.join(tempDir, 'test.png')
+      fs.copyFileSync(path.join(testFolder, 'test.png'), file)
+      fs.chmodSync(file, 0o000)
+      const { status, stderr } = run([tempDir])
+
+      assert.strictEqual(status, 1)
+      assert.match(stderr, /Error compressing .*test\.png/)
+    })
+  })
+
+  describe('Staged images', () => {
+    const run = (args, options = {}) => spawnSync(process.execPath, [imageGuardScript, '--no-cache', '--staged', ...args], { encoding: 'utf8', ...options })
+
+    let tempDir
+    let git
+    beforeEach(async () => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-staged-'))
+      git = simpleGit(tempDir)
+      await git.init()
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    test('Stages the compressed images', async () => {
+      fs.copyFileSync(path.join(testFolder, 'test.png'), path.join(tempDir, 'test.png'))
+      await git.add('.')
+      const { stdout } = run([], { cwd: tempDir })
+
+      assert.match(stdout, /Compressed test\.png/)
+      assert.strictEqual(await git.raw(['diff', '--name-only']), '', 'Nothing should be left unstaged')
+    })
+
+    test('Leaves images with unstaged changes unstaged', async () => {
+      const file = path.join(tempDir, 'test.png')
+      fs.copyFileSync(path.join(testFolder, 'test.png'), file)
+      await git.add('.')
+      const blobBefore = await git.revparse([':test.png'])
+      await sharp(path.join(testFolder, 'test.png')).flop().png({ compressionLevel: 0 }).toFile(file)
+      const { stdout, stderr } = run([], { cwd: tempDir })
+
+      assert.match(stdout, /Compressed test\.png/)
+      assert.match(stderr, /test\.png.*unstaged changes/)
+      assert.strictEqual(await git.revparse([':test.png']), blobBefore)
+    })
+
+    test('Processes images with non-ASCII names', async () => {
+      fs.copyFileSync(path.join(testFolder, 'test.png'), path.join(tempDir, 'bild-ä.png'))
+      await git.add('.')
+      const { stdout } = run([], { cwd: tempDir })
+
+      assert.match(stdout, /Compressed bild-ä\.png/)
+    })
+
+    test('Processes images when run from a subdirectory', async () => {
+      const subDir = path.join(tempDir, 'sub')
+      fs.mkdirSync(subDir)
+      fs.copyFileSync(path.join(testFolder, 'test.png'), path.join(tempDir, 'test.png'))
+      await git.add('.')
+      const { stdout, status } = run([], { cwd: subDir })
+
+      assert.strictEqual(status, 0)
+      assert.match(stdout, /Compressed test\.png/)
+    })
+
+    test('Stages the AVIF file and the removed HEIC file after conversion', async () => {
+      fs.copyFileSync(path.join(testFolder, 'test.heic'), path.join(tempDir, 'new.heic'))
+      await git.add('.')
+      run(['--heic-to-avif'], { cwd: tempDir })
+
+      const staged = (await git.raw(['diff', '--cached', '--name-status'])).trim().split('\n').sort()
+      assert.deepStrictEqual(staged, ['A\tnew.avif'])
+      assert.strictEqual(await git.raw(['diff', '--name-only']), '')
+    })
+  })
+
+  test('Runs through a symlink, as in global installs', { skip: process.platform === 'win32' }, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-global-'))
+    try {
+      const dirModules = path.join(tempDir, 'lib', 'node_modules')
+      fs.mkdirSync(dirModules, { recursive: true })
+      fs.mkdirSync(path.join(tempDir, 'bin'))
+      fs.symlinkSync(path.join(__dirname, '..'), path.join(dirModules, 'image-guard'))
+      fs.symlinkSync('../lib/node_modules/image-guard/bin/image-guard.sh', path.join(tempDir, 'bin', 'image-guard'))
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'))
+
+      assert.strictEqual(execFileSync(path.join(tempDir, 'bin', 'image-guard'), ['--version'], { encoding: 'utf8' }).trim(), pkg.version)
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
   })
 })

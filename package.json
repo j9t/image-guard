@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "heic-decode": "^2.1.0",
-    "ignore": "^7.0.12",
+    "ignore": "^7.0.14",
     "sharp": "^0.35.5",
     "simple-git": "^4.0.2",
     "tinyglobby": "^0.2.17"

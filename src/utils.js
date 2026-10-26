@@ -226,6 +226,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
     if (msg.includes('corrupt header') ||
       msg.includes('unexpected end of') ||
       msg.includes('invalid image') ||
+      msg.includes('unsupported image format') ||
       msg.includes('gifload:') ||
       msg.includes('pngload:') ||
       msg.includes('jpegload:') ||

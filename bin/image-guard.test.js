@@ -1127,7 +1127,15 @@ describe('Image Guard', () => {
       assert.ok(before.equals(fs.readFileSync(file)), 'The file should be unchanged')
     })
 
-    test('Fails on images it can’t read', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
+    test('Skips files in an unsupported format', () => {
+      fs.writeFileSync(path.join(tempDir, 'text.png'), 'Not an image')
+      const { status, stdout } = run([tempDir])
+
+      assert.strictEqual(status, 0)
+      assert.match(stdout, /Skipped .*text\.png \(corrupt file\)/)
+    })
+
+    test('Fails on images it can’t read',{ skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
       const file = path.join(tempDir, 'test.png')
       fs.copyFileSync(path.join(testFolder, 'test.png'), file)
       fs.chmodSync(file, 0o000)

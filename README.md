@@ -152,7 +152,7 @@ Automated compression works by monitoring whether a given [change list](https://
 
 Compression removes metadata, except for what affects how an image looks: its orientation, its color profile (unless that’s sRGB, which browsers assume anyway), CMYK color, and the bit depth of AVIF images.
 
-PNG images with more than 256 colors are reduced to 256 colors (with dithering) where a comparison with the original shows no visible change—as for most screenshots, graphics, and photos. Other PNG images, like ones with colorful smooth gradients, are compressed losslessly.
+PNG images with more than 256 colors are reduced to 256 colors (with dithering) where that makes them smaller and a comparison with the original shows no visible change, overall or in any small area. Other PNG images, like most photos, grayscale images, and images with smooth gradients or small elements in rare colors, are compressed losslessly, keeping their bit depth. (How the comparison was calibrated is documented in [benchmark/visual-review.md](benchmark/visual-review.md).)
 
 Animated PNGs (APNG) are skipped, as sharp would keep only their first frame.
 
@@ -168,7 +168,7 @@ The record is kept in node_modules/.cache/image-guard of the project being proce
 
 You use Image Guard when you need a simple, automatable, robust solution to compress images in a way that limits unnecessary image payload right from the start, in your repositories, and that reduces the risk that entirely uncompressed images go into production.
 
-As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. Repeat runs don’t degrade quality further: Once compressed, images are left as they are, even when the [record of processed images](#record-of-processed-images) is bypassed or cleared.
+As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. Repeat runs don’t degrade quality further, even when the [record of processed images](#record-of-processed-images) is bypassed or cleared.
 
 ## What Does Image Guard _Not_ Do?
 

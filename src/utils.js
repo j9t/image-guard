@@ -63,8 +63,8 @@ const isSrgbProfile = (icc) => {
   return false
 }
 
-// Keeps what affects how the image looks—orientation, color profile, CMYK, and
-// high bit depth for AVIF—while dropping all other metadata
+// Keeps what affects how the image looks—orientation, color profile, CMYK, grayscale, and
+// high bit depth—while dropping all other metadata
 const createPipeline = (input, format, metadata, quantize = false) => {
   const { options, settings, settingsPalette, settingsQuantized } = formatConfigs[format]
   const settingsImage = quantize ? settingsQuantized : metadata.isPalette && settingsPalette ? settingsPalette : settings
@@ -72,6 +72,9 @@ const createPipeline = (input, format, metadata, quantize = false) => {
   if (metadata.icc && !isSrgbProfile(metadata.icc)) pipeline = pipeline.keepIccProfile()
   if (metadata.orientation > 1) pipeline = pipeline.withExif({ IFD0: { Orientation: String(metadata.orientation) } })
   if (metadata.space === 'cmyk') pipeline = pipeline.pipelineColourspace('cmyk').toColourspace('cmyk')
+  if (format === 'png' && !quantize && (metadata.bitsPerSample > 8 || metadata.space === 'b-w')) {
+    return pipeline.toColourspace(metadata.space).toFormat(format, settingsImage)
+  }
   if (format === 'avif' && metadata.bitsPerSample > 8) {
     return pipeline.toColourspace(metadata.space).toFormat(format, { ...settingsImage, bitdepth: metadata.bitsPerSample })
   }
@@ -79,32 +82,63 @@ const createPipeline = (input, format, metadata, quantize = false) => {
 }
 
 // Compares lightly blurred pixels, so that dithering, which the eye blends, counts less than
-// shifted colors and blotches; the limits leave photos and screenshots well within, and
-// colorful smooth images, where 256 colors show, outside
+// shifted colors and blotches—overall, and in every 16×16 area, so that small changes, like
+// icons losing their color, count, too; the limits follow a visual review, in which established
+// metrics (SSIMULACRA2, DSSIM, SSIM) predicted visible changes less well (benchmark/visual-review.md)
 const isVisiblySame = async (input, output) => {
-  const read = (data) => sharp(data).toColourspace('srgb').ensureAlpha().blur(1).raw().toBuffer()
-  const [pixelsInput, pixelsOutput] = await Promise.all([read(input), read(output)])
+  const read = (data) => sharp(data).toColourspace('srgb').ensureAlpha().blur(1).raw().toBuffer({ resolveWithObject: true })
+  const [{ data: pixelsInput, info: { width, height } }, { data: pixelsOutput }] = await Promise.all([read(input), read(output)])
   // Counts differences by value, as sorting them would hold up other images for longer
   const histogram = new Uint32Array(256)
+  // Sums differences in 8×8 cells, of which 2×2 make up an area
+  const widthCells = Math.ceil(width / 8)
+  const heightCells = Math.ceil(height / 8)
+  const cells = new Float64Array(widthCells * heightCells)
   let sum = 0
-  for (let i = 0; i < pixelsInput.length; i += 4) {
-    // Weighs colors by opacity, as colors of transparent pixels don’t show
-    const alphaInput = pixelsInput[i + 3]
-    const alphaOutput = pixelsOutput[i + 3]
-    let diff = Math.abs(alphaInput - alphaOutput) * 255
-    for (let c = i; c < i + 3; c++) {
-      const diffColor = Math.abs(pixelsInput[c] * alphaInput - pixelsOutput[c] * alphaOutput)
-      if (diffColor > diff) diff = diffColor
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      // Weighs colors by opacity, as colors of transparent pixels don’t show
+      const alphaInput = pixelsInput[i + 3]
+      const alphaOutput = pixelsOutput[i + 3]
+      let diff = Math.abs(alphaInput - alphaOutput) * 255
+      for (let c = i; c < i + 3; c++) {
+        const diffColor = Math.abs(pixelsInput[c] * alphaInput - pixelsOutput[c] * alphaOutput)
+        if (diffColor > diff) diff = diffColor
+      }
+      histogram[(diff / 255) | 0]++
+      sum += diff / 255
+      cells[(y >> 3) * widthCells + (x >> 3)] += diff / 255
     }
-    histogram[(diff / 255) | 0]++
-    sum += diff / 255
   }
-  const count = pixelsInput.length / 4
+  const count = width * height
   // The difference that 99.9% of pixels stay within
   let seen = 0
   let diffTop = 0
   while ((seen += histogram[diffTop]) <= Math.floor(count * 0.999)) diffTop++
-  return sum / count <= 3 && diffTop <= 20
+  // The largest average difference of an area, with areas overlapping by half
+  let diffArea = 0
+  for (let y = 0; y < heightCells - 1; y++) {
+    for (let x = 0; x < widthCells - 1; x++) {
+      const k = y * widthCells + x
+      const diffAverage = (cells[k] + cells[k + 1] + cells[k + widthCells] + cells[k + widthCells + 1]) / 256
+      if (diffAverage > diffArea) diffArea = diffAverage
+    }
+  }
+  return sum / count <= 3 && diffTop <= 20 && diffArea <= 5.5
+}
+
+// Reduces PNG images to 256 colors where that doesn’t visibly change them—once reduced, they
+// use a palette, which later runs keep losslessly—and compresses all other images as configured
+const encode = async (input, format) => {
+  const metadata = await sharp(input).metadata()
+  // Leaves out grayscale images, as palettes don’t make 8-bit ones smaller
+  if (format === 'png' && !metadata.isPalette && metadata.channels > 1) {
+    const output = await createPipeline(input, format, metadata, true).toBuffer()
+    // Gives way to lossless compression where dithering makes images larger, as in some screenshots
+    if (output.length < input.length && await isVisiblySame(input, output)) return output
+  }
+  return createPipeline(input, format, metadata).toBuffer()
 }
 
 // Detects APNG images, of which libvips would keep only the first frame
@@ -117,7 +151,7 @@ const isAnimatedPng = (data) => {
 export const hash = (data) => createHash('sha256').update(data).digest('hex')
 
 // Identifies what compression results depend on, to tell when recorded results no longer apply
-const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
+const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [encode, createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects
@@ -199,18 +233,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
       return noChange()
     }
 
-    const metadata = await sharp(input).metadata()
-    let output
-    // Once reduced, images use a palette, which later runs keep losslessly
-    if (outputFormat === 'png' && !metadata.isPalette) {
-      const outputQuantized = await createPipeline(input, outputFormat, metadata, true).toBuffer()
-      if (await isVisiblySame(input, outputQuantized)) {
-        // Includes the lossless palette pass of later runs, so they find nothing left to compress
-        const outputPalette = await createPipeline(outputQuantized, outputFormat, { ...metadata, isPalette: true }).toBuffer()
-        output = outputPalette.length < outputQuantized.length ? outputPalette : outputQuantized
-      }
-    }
-    output ??= await createPipeline(input, outputFormat, metadata).toBuffer()
+    const output = await encode(input, outputFormat)
     const fileSizeAfter = output.length
     if (fileSizeAfter === 0) {
       throw new Error('Compressed file size is 0')

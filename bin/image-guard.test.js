@@ -977,15 +977,36 @@ describe('Image Guard', () => {
       return sharp(data, { raw: { width, height, channels: 3 } })
     }
 
-    // More than 256 colors, in smooth transitions a palette with dithering renders without visible change
-    const createGradient = (width = 320, height = 240) => {
+    const colorGradient = (x, y, width, height) => [
+      80 + Math.round(x / (width - 1) * 120),
+      80 + Math.round(y / (height - 1) * 120),
+      80 + Math.round((x + y) / (width + height - 2) * 120)
+    ]
+
+    // More than 256 colors, in muted smooth transitions a palette with dithering renders
+    // without visible change; `overlay` returns colors to draw over it, if any
+    const createGradient = (width = 640, height = 480, overlay = () => undefined) => {
       const data = Buffer.alloc(width * height * 3)
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          data.set([Math.round(x / (width - 1) * 255), Math.round(y / (height - 1) * 255), 128], (y * width + x) * 3)
+          data.set(overlay(x, y) ?? colorGradient(x, y, width, height), (y * width + x) * 3)
         }
       }
       return sharp(data, { raw: { width, height, channels: 3 } })
+    }
+
+    // Pattern in the left half, nearly transparent, gradient in the right half, opaque
+    const createTransparent = (width = 640, height = 480) => {
+      const data = Buffer.alloc(width * height * 4)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const color = x < width / 2
+            ? [(x * 3) & 255, (y * 5) & 255, ((x ^ y) * 3) & 255, 8]
+            : [...colorGradient(x, y, width, height), 255]
+          data.set(color, (y * width + x) * 4)
+        }
+      }
+      return sharp(data, { raw: { width, height, channels: 4 } })
     }
 
     // Two-frame APNG, which libvips reads as a still image
@@ -1076,6 +1097,102 @@ describe('Image Guard', () => {
       assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
     })
 
+    test('Keeps PNG images with colorful smooth gradients lossless', async () => {
+      const file = path.join(tempDir, 'colorful.png')
+      const width = 320
+      const height = 240
+      const data = Buffer.alloc(width * height * 3)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          data.set([Math.round(x / (width - 1) * 255), Math.round(y / (height - 1) * 255), 128], (y * width + x) * 3)
+        }
+      }
+      await sharp(data, { raw: { width, height, channels: 3 } }).png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*colorful\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Compresses PNG images losslessly where a palette would make them larger', async () => {
+      const file = path.join(tempDir, 'subtle.png')
+      const width = 320
+      const height = 240
+      const data = Buffer.alloc(width * height * 3)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          data.set([150 + Math.floor(x / 4), 150 + Math.floor(y / 4), 200], (y * width + x) * 3)
+        }
+      }
+      await sharp(data, { raw: { width, height, channels: 3 } }).png({ compressionLevel: 6 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*subtle\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Keeps PNG images lossless where a palette would change the color of small elements', async () => {
+      const file = path.join(tempDir, 'icons.png')
+      const colors = [[0, 160, 160], [220, 30, 30], [230, 0, 230], [255, 200, 0], [40, 40, 200], [0, 200, 60], [140, 70, 20], [255, 120, 180]]
+      // 6×6 icons in rare colors, taking up less than 0.1% of the image
+      const icons = (x, y) => y >= 240 && y < 246 && x >= 16 && (x - 16) % 76 < 6 ? colors[Math.floor((x - 16) / 76)] : undefined
+      await createGradient(640, 480, icons).png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*icons\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Reduces PNG images to a palette where only the colors of nearly transparent pixels change', async () => {
+      const file = path.join(tempDir, 'transparent.png')
+      await createTransparent().png({ compressionLevel: 0 }).toFile(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*transparent\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, true)
+    })
+
+    test('Keeps semi-transparent PNG images lossless where a palette would visibly change them', async () => {
+      const file = path.join(tempDir, 'translucent.png')
+      await createPattern().ensureAlpha(0.5).png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*translucent\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Keeps grayscale PNG images lossless and in grayscale', async () => {
+      const file = path.join(tempDir, 'gray.png')
+      await createGradient().toColourspace('b-w').png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+      const metadataAfter = await metadata(file)
+
+      assert.match(stdout, /Compressed .*gray\.png/)
+      assert.strictEqual(metadataAfter.isPalette, false)
+      assert.strictEqual(metadataAfter.channels, 1)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
+    test('Keeps the bit depth of 16-bit PNG images where a palette would visibly change them', async () => {
+      const file = path.join(tempDir, 'deep.png')
+      await createPattern().toColourspace('rgb16').png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*deep\.png/)
+      assert.strictEqual((await metadata(file)).bitsPerSample, 16)
+      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+    })
+
     test('Keeps palette PNG images lossless and compresses them as palette images', async () => {
       const file = path.join(tempDir, 'palette.png')
       await createPattern().png({ palette: true, colours: 200, dither: 0, compressionLevel: 0 }).toFile(file)
@@ -1115,14 +1232,14 @@ describe('Image Guard', () => {
       ['webp', () => createPattern().webp({ lossless: true, effort: 0 })],
       ['avif', () => createPattern().avif({ lossless: true, effort: 0 })]
     ]) {
-      test(`Leaves ${format.toUpperCase()} images unchanged on repeat runs`, async () => {
+      test(`Leaves the pixels of ${format.toUpperCase()} images unchanged on repeat runs`, async () => {
         const file = path.join(tempDir, `repeat.${format}`)
         await create().toFile(file)
         run([tempDir])
-        const after = fs.readFileSync(file)
+        const after = await pixels(file)
         run([tempDir])
 
-        assert.ok(after.equals(fs.readFileSync(file)), 'A repeat run should leave the file unchanged')
+        assert.ok(after.equals(await pixels(file)), 'A repeat run should leave the pixels unchanged')
       })
     }
 

@@ -152,7 +152,7 @@ Automated compression works by monitoring whether a given [change list](https://
 
 Compression removes metadata, except for what affects how an image looks: its orientation, its color profile (unless that’s sRGB, which browsers assume anyway), CMYK color, and the bit depth of AVIF images.
 
-PNG images with more than 256 colors are reduced to 256 colors (with dithering) where that makes them smaller and a comparison with the original shows no visible change, overall or in any small area. Other PNG images, like most photos, grayscale images, and images with smooth gradients or small elements in rare colors, are compressed losslessly, keeping their bit depth. (How the comparison was calibrated is documented in [benchmark/visual-review.md](benchmark/visual-review.md).)
+PNG images with more than 256 colors are reduced to 256 colors (with dithering) where that makes them smaller and a comparison with the original shows no visible change, overall or in any small area. Other PNG images, like most photos, grayscale images, and images with smooth gradients or small elements in rare colors, are compressed losslessly, keeping their bit depth.
 
 Animated PNGs (APNG) are skipped, as sharp would keep only their first frame.
 

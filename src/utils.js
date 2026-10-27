@@ -84,7 +84,7 @@ const createPipeline = (input, format, metadata, quantize = false) => {
 // Compares lightly blurred pixels, so that dithering, which the eye blends, counts less than
 // shifted colors and blotches—overall, and in every 16×16 area, so that small changes, like
 // icons losing their color, count, too; the limits follow a visual review, in which established
-// metrics (SSIMULACRA2, DSSIM, SSIM) predicted visible changes less well (benchmark/visual-review.md)
+// metrics (SSIMULACRA2, DSSIM, SSIM) predicted visible changes less well
 const isVisiblySame = async (input, output) => {
   const read = (data) => sharp(data).toColourspace('srgb').ensureAlpha().blur(1).raw().toBuffer({ resolveWithObject: true })
   const [{ data: pixelsInput, info: { width, height } }, { data: pixelsOutput }] = await Promise.all([read(input), read(output)])

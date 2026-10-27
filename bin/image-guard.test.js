@@ -961,6 +961,8 @@ describe('Image Guard', () => {
     const run = (args, options = {}) => spawnSync(process.execPath, [imageGuardScript, '--no-cache', ...args], { encoding: 'utf8', ...options })
     // Reads from buffers, as libvips caches what it reads by path
     const pixels = (file) => sharp(fs.readFileSync(file)).raw().toBuffer()
+    // Reads 16-bit samples, which `raw()` alone reduces to 8 bits
+    const pixels16 = async (file) => new Uint16Array((await sharp(fs.readFileSync(file)).toColourspace('rgb16').raw({ depth: 'ushort' }).toBuffer()).buffer)
     const metadata = (file) => sharp(fs.readFileSync(file)).metadata()
 
     // More than 256 colors, in a pattern a palette would visibly change
@@ -977,11 +979,12 @@ describe('Image Guard', () => {
       return sharp(data, { raw: { width, height, channels: 3 } })
     }
 
-    const colorGradient = (x, y, width, height) => [
-      80 + Math.round(x / (width - 1) * 120),
-      80 + Math.round(y / (height - 1) * 120),
-      80 + Math.round((x + y) / (width + height - 2) * 120)
-    ]
+    // `scale` 257 maps the colors to 16 bits, keeping steps 8 bits can’t hold
+    const colorGradient = (x, y, width, height, scale = 1) => [
+      x / (width - 1),
+      y / (height - 1),
+      (x + y) / (width + height - 2)
+    ].map((position) => Math.round((80 + position * 120) * scale))
 
     // More than 256 colors, in muted smooth transitions a palette with dithering renders
     // without visible change; `overlay` returns colors to draw over it, if any
@@ -1196,13 +1199,21 @@ describe('Image Guard', () => {
 
     test('Keeps 16-bit PNG images lossless, even where a palette wouldn’t visibly change them', async () => {
       const file = path.join(tempDir, 'deep.png')
-      await createGradient().toColourspace('rgb16').png({ compressionLevel: 0 }).toFile(file)
-      const before = await pixels(file)
+      const [width, height] = [640, 480]
+      const data = new Uint16Array(width * height * 3)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          data.set(colorGradient(x, y, width, height, 257), (y * width + x) * 3)
+        }
+      }
+      await sharp(data, { raw: { width, height, channels: 3 } }).toColourspace('rgb16').png({ compressionLevel: 0 }).toFile(file)
+      const before = await pixels16(file)
       const { stdout } = run([tempDir])
 
+      assert.ok(before.some((value) => value % 257 !== 0), 'Input should use 16-bit precision')
       assert.match(stdout, /Compressed .*deep\.png/)
       assert.strictEqual((await metadata(file)).bitsPerSample, 16)
-      assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+      assert.deepStrictEqual(await pixels16(file), before)
     })
 
     test('Keeps palette PNG images lossless and compresses them as palette images', async () => {

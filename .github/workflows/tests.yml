@@ -41,7 +41,7 @@ jobs:
       - name: "Run tests"
         run: npm test
       - name: "Run as installed package"
-        # Calls the bin through the shim npm generates (a .cmd file on Windows) via the platform’s shell
+        # Calls the bin through bash, as Git hooks do (Command Prompt and PowerShell aren’t supported on Windows)
         if: matrix.node == 'lts/*'
         shell: bash
         run: |
@@ -51,7 +51,8 @@ jobs:
           npm init -y
           npm install ./image-guard-*.tgz
           # Not `npx`, which answers `--version` itself when the bin is missing
-          node -e "const out = require('child_process').execSync(require('path').join('node_modules', '.bin', 'image-guard') + ' --version').toString().trim(); if (out !== process.argv[1]) throw new Error('Unexpected output: ' + out)" "$version"
+          out="$(node_modules/.bin/image-guard --version)"
+          [ "$out" = "$version" ] || { echo "Unexpected output: $out" >&2; exit 1; }
 
   # sharp and heic-decode ship native binaries, and the bin is a shell script
   test-platforms:
@@ -76,7 +77,7 @@ jobs:
       - name: "Run tests"
         run: npm test
       - name: "Run as installed package"
-        # Calls the bin through the shim npm generates (a .cmd file on Windows) via the platform’s shell
+        # Calls the bin through bash, as Git hooks do (Command Prompt and PowerShell aren’t supported on Windows)
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
@@ -85,4 +86,16 @@ jobs:
           npm init -y
           npm install ./image-guard-*.tgz
           # Not `npx`, which answers `--version` itself when the bin is missing
-          node -e "const out = require('child_process').execSync(require('path').join('node_modules', '.bin', 'image-guard') + ' --version').toString().trim(); if (out !== process.argv[1]) throw new Error('Unexpected output: ' + out)" "$version"
+          out="$(node_modules/.bin/image-guard --version)"
+          [ "$out" = "$version" ] || { echo "Unexpected output: $out" >&2; exit 1; }
+      - name: "Run through npm from PowerShell"
+        # Checks the README’s Windows setup, which has npm run commands through Git Bash
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          cd $env:RUNNER_TEMP
+          npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+          npm pkg set scripts.check="image-guard --version"
+          $out = npm run --silent check
+          if ($out -ne $version) { throw "Unexpected output: $out" }

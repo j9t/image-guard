@@ -12,7 +12,11 @@ It’s as safe as possible because compression happens losslessly (near-lossless
 
 ## Installation and Use
 
-(Note available parameters below.)
+On Windows, Image Guard needs Git Bash, which comes with [Git for Windows](https://gitforwindows.org/). Git hooks use it already. For npx and npm scripts (from any shell, including PowerShell), have npm use Git Bash, too:
+
+```shell
+npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+```
 
 ### Ways to Use Image Guard
 

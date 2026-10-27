@@ -35,6 +35,15 @@ describe('Staged images', () => {
     assert.strictEqual(allCompressed, true)
   })
 
+  test('Fails outside a Git repository without claiming there were no images', () => {
+    const dirOutside = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-no-repo-'))
+    const { status, stdout } = run([], { cwd: dirOutside })
+    fs.rmSync(dirOutside, { recursive: true, force: true })
+
+    assert.strictEqual(status, 1)
+    assert.doesNotMatch(stdout, /There were no images/)
+  })
+
   test('Ignores a directory with `--staged`', async () => {
     const subDir = path.join(tempDir, 'Assets')
     fs.mkdirSync(subDir, { recursive: true })

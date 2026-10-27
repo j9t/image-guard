@@ -44,26 +44,21 @@ export function isIgnoreCandidate(file) {
   return allowedFileTypes.includes(path.extname(file).slice(1).toLowerCase())
 }
 
+// Checks every original, so images missing from `dir` count as uncompressed
 export function areImagesCompressed(dir, originalDir = testFolder) {
   const uncompressedFiles = []
-  const allCompressed = fs.readdirSync(dir).every(file => {
-    if (ignoreFiles.includes(file)) return true
+  for (const file of fs.readdirSync(originalDir)) {
+    if (ignoreFiles.includes(file)) continue
     const ext = path.extname(file).slice(1).toLowerCase()
-    if (!allowedFileTypes.includes(ext)) return true
-    const filePath = path.join(dir, file)
-    const originalFilePath = path.join(originalDir, file)
+    if (!allowedFileTypes.includes(ext)) continue
     try {
-      const originalStats = fs.statSync(originalFilePath)
-      const compressedStats = fs.statSync(filePath)
-      const isCompressed = compressedStats.size < originalStats.size
-      if (!isCompressed) {
-        uncompressedFiles.push(file)
-      }
-      return isCompressed
+      const originalStats = fs.statSync(path.join(originalDir, file))
+      const compressedStats = fs.statSync(path.join(dir, file))
+      if (compressedStats.size >= originalStats.size) uncompressedFiles.push(file)
     } catch (err) {
-      console.warn(`Skipping possibly corrupt file: ${file} (${err.message})`)
-      return true
+      console.warn(`Could not compare ${file} (${err.message})`)
+      uncompressedFiles.push(file)
     }
-  })
-  return { allCompressed, uncompressedFiles }
+  }
+  return { allCompressed: uncompressedFiles.length === 0, uncompressedFiles }
 }

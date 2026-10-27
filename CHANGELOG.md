@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 * Ensured dry runs report what a real run would save (rather than “0.00 KB”) and say that nothing was saved (“Dry run completed. Defensive base compression would save…”)
+* Ensured `--staged` runs that fail before finding images (e.g., outside a Git repository) no longer claim there were no images to compress
 
 ### Changed
 

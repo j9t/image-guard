@@ -356,5 +356,7 @@ Options:
   if (!argv.dry) cache?.save()
 
   if (hadFailures) process.exitCode = 1
-  summary(totalFiles > 0, doConversion, hadFailures)
+
+  // A run that failed before finding files has nothing to sum up
+  if (!hadFailures || totalFiles > 0) summary(totalFiles > 0, doConversion, hadFailures)
 }

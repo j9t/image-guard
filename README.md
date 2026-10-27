@@ -8,7 +8,7 @@ Image Guard takes care of near-lossless compression of your images, to help you 
 
 It’s convenient because setup is simple. Run it right away—done. Or install, run, add hook—done.
 
-It’s as safe as possible because compression happens losslessly (near-lossless for JPG and GIF images). That allows you to stop worrying about forgetting to compress images, but also about sacrificing too much quality. (You can take care of additional optimizations manually or through other tooling.)
+It’s as safe as possible because compression happens losslessly (near-lossless for PNG, JPG, and GIF images). That allows you to stop worrying about forgetting to compress images, but also about sacrificing too much quality. (You can take care of additional optimizations manually or through other tooling.)
 
 ## Installation and Use
 
@@ -152,6 +152,8 @@ Automated compression works by monitoring whether a given [change list](https://
 
 Compression removes metadata, except for what affects how an image looks: its orientation, its color profile (unless that’s sRGB, which browsers assume anyway), CMYK color, and the bit depth of AVIF images.
 
+PNG images with more than 256 colors are reduced to 256 colors (with dithering) where a comparison with the original shows no visible change—as for most screenshots, graphics, and photos. Other PNG images, like ones with colorful smooth gradients, are compressed losslessly.
+
 Animated PNGs (APNG) are skipped, as sharp would keep only their first frame.
 
 Through this approach, though glossed over here, Image Guard makes up for what’s missing or complicated in other packages, namely easy, near-riskless, automatable, resource-friendly in-repo optimization.
@@ -166,7 +168,7 @@ The record is kept in node_modules/.cache/image-guard of the project being proce
 
 You use Image Guard when you need a simple, automatable, robust solution to compress images in a way that limits unnecessary image payload right from the start, in your repositories, and that reduces the risk that entirely uncompressed images go into production.
 
-As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. (Lossless compression is not possible for every image format, however, so there’s a risk when excessively iterating over the same images. Doing so may eventually degrade quality. The [record of processed images](#record-of-processed-images) prevents this, unless it’s bypassed or cleared.)
+As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. Repeat runs don’t degrade quality further: Once compressed, images are left as they are, even when the [record of processed images](#record-of-processed-images) is bypassed or cleared.
 
 ## What Does Image Guard _Not_ Do?
 

@@ -18,8 +18,11 @@ const formatConfigs = {
   png: {
     options: {},
     settings: { compressionLevel: 9 },
-    // Lossless only for images that already use a palette, as quantization reduces others to 256 colors
-    settingsPalette: { palette: true, quality: 100, dither: 0, effort: 10 }
+    // Lossless for images that already use a palette
+    settingsPalette: { palette: true, quality: 100, dither: 0, effort: 10 },
+    // Reduces other images to 256 colors, kept only where that doesn’t visibly change them
+    // (effort 7 being as small and as close to the original as 10, in two-thirds of the time)
+    settingsQuantized: { palette: true, quality: 100, effort: 7 }
   },
   gif: {
     options: { pages: -1 },
@@ -62,9 +65,9 @@ const isSrgbProfile = (icc) => {
 
 // Keeps what affects how the image looks—orientation, color profile, CMYK, and
 // high bit depth for AVIF—while dropping all other metadata
-const createPipeline = (input, format, metadata) => {
-  const { options, settings, settingsPalette } = formatConfigs[format]
-  const settingsImage = metadata.isPalette && settingsPalette ? settingsPalette : settings
+const createPipeline = (input, format, metadata, quantize = false) => {
+  const { options, settings, settingsPalette, settingsQuantized } = formatConfigs[format]
+  const settingsImage = quantize ? settingsQuantized : metadata.isPalette && settingsPalette ? settingsPalette : settings
   let pipeline = sharp(input, options)
   if (metadata.icc && !isSrgbProfile(metadata.icc)) pipeline = pipeline.keepIccProfile()
   if (metadata.orientation > 1) pipeline = pipeline.withExif({ IFD0: { Orientation: String(metadata.orientation) } })
@@ -73,6 +76,35 @@ const createPipeline = (input, format, metadata) => {
     return pipeline.toColourspace(metadata.space).toFormat(format, { ...settingsImage, bitdepth: metadata.bitsPerSample })
   }
   return pipeline.toFormat(format, settingsImage)
+}
+
+// Compares lightly blurred pixels, so that dithering, which the eye blends, counts less than
+// shifted colors and blotches; the limits leave photos and screenshots well within, and
+// colorful smooth images, where 256 colors show, outside
+const isVisiblySame = async (input, output) => {
+  const read = (data) => sharp(data).toColourspace('srgb').ensureAlpha().blur(1).raw().toBuffer()
+  const [pixelsInput, pixelsOutput] = await Promise.all([read(input), read(output)])
+  // Counts differences by value, as sorting them would hold up other images for longer
+  const histogram = new Uint32Array(256)
+  let sum = 0
+  for (let i = 0; i < pixelsInput.length; i += 4) {
+    // Weighs colors by opacity, as colors of transparent pixels don’t show
+    const alphaInput = pixelsInput[i + 3]
+    const alphaOutput = pixelsOutput[i + 3]
+    let diff = Math.abs(alphaInput - alphaOutput) * 255
+    for (let c = i; c < i + 3; c++) {
+      const diffColor = Math.abs(pixelsInput[c] * alphaInput - pixelsOutput[c] * alphaOutput)
+      if (diffColor > diff) diff = diffColor
+    }
+    histogram[(diff / 255) | 0]++
+    sum += diff / 255
+  }
+  const count = pixelsInput.length / 4
+  // The difference that 99.9% of pixels stay within
+  let seen = 0
+  let diffTop = 0
+  while ((seen += histogram[diffTop]) <= Math.floor(count * 0.999)) diffTop++
+  return sum / count <= 3 && diffTop <= 20
 }
 
 // Detects APNG images, of which libvips would keep only the first frame
@@ -85,7 +117,7 @@ const isAnimatedPng = (data) => {
 export const hash = (data) => createHash('sha256').update(data).digest('hex')
 
 // Identifies what compression results depend on, to tell when recorded results no longer apply
-const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [createPipeline, isSrgbProfile].map(String), versions: sharp.versions })).slice(0, 16)
+const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects
@@ -167,7 +199,18 @@ const compression = async (filename, dry, quiet = false, cache) => {
       return noChange()
     }
 
-    const output = await createPipeline(input, outputFormat, await sharp(input).metadata()).toBuffer()
+    const metadata = await sharp(input).metadata()
+    let output
+    // Once reduced, images use a palette, which later runs keep losslessly
+    if (outputFormat === 'png' && !metadata.isPalette) {
+      const outputQuantized = await createPipeline(input, outputFormat, metadata, true).toBuffer()
+      if (await isVisiblySame(input, outputQuantized)) {
+        // Includes the lossless palette pass of later runs, so they find nothing left to compress
+        const outputPalette = await createPipeline(outputQuantized, outputFormat, { ...metadata, isPalette: true }).toBuffer()
+        output = outputPalette.length < outputQuantized.length ? outputPalette : outputQuantized
+      }
+    }
+    output ??= await createPipeline(input, outputFormat, metadata).toBuffer()
     const fileSizeAfter = output.length
     if (fileSizeAfter === 0) {
       throw new Error('Compressed file size is 0')

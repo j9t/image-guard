@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-* Ensured PNG compression is lossless—true-color images had been reduced to 256 colors, while images that already use a palette keep being compressed as palette images
+* Ensured PNG compression reduces images to 256 colors only where that doesn’t visibly change them (as compared with the original), and compresses all other PNG images losslessly
 * Ensured compression keeps the orientation (EXIF) and color profile of images, the colors of CMYK JPG images, and the bit depth of 10- and 12-bit AVIF images
 * Ensured animated PNGs (APNG) are skipped rather than reduced to their first frame
 * Ensured `--staged` stages the images it compresses or converts (except images with unstaged changes), so the commit includes them

@@ -963,7 +963,7 @@ describe('Image Guard', () => {
     const pixels = (file) => sharp(fs.readFileSync(file)).raw().toBuffer()
     const metadata = (file) => sharp(fs.readFileSync(file)).metadata()
 
-    // More than 256 colors, to rule out palettes
+    // More than 256 colors, in a pattern a palette would visibly change
     const createPattern = (width = 320, height = 240) => {
       const data = Buffer.alloc(width * height * 3)
       for (let y = 0; y < height; y++) {
@@ -972,6 +972,17 @@ describe('Image Guard', () => {
           data[i] = (x * 3) & 255
           data[i + 1] = (y * 5) & 255
           data[i + 2] = ((x ^ y) * 3) & 255
+        }
+      }
+      return sharp(data, { raw: { width, height, channels: 3 } })
+    }
+
+    // More than 256 colors, in smooth transitions a palette with dithering renders without visible change
+    const createGradient = (width = 320, height = 240) => {
+      const data = Buffer.alloc(width * height * 3)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          data.set([Math.round(x / (width - 1) * 255), Math.round(y / (height - 1) * 255), 128], (y * width + x) * 3)
         }
       }
       return sharp(data, { raw: { width, height, channels: 3 } })
@@ -1045,7 +1056,16 @@ describe('Image Guard', () => {
       fs.rmSync(tempDir, { recursive: true, force: true })
     })
 
-    test('Keeps true-color PNG images lossless', async () => {
+    test('Reduces true-color PNG images to a palette where that doesn’t visibly change them', async () => {
+      const file = path.join(tempDir, 'gradient.png')
+      await createGradient().png({ compressionLevel: 0 }).toFile(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*gradient\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, true)
+    })
+
+    test('Keeps true-color PNG images lossless where a palette would visibly change them', async () => {
       const file = path.join(tempDir, 'truecolor.png')
       await createPattern().png({ compressionLevel: 0 }).toFile(file)
       const before = await pixels(file)
@@ -1085,6 +1105,24 @@ describe('Image Guard', () => {
         assert.strictEqual(metadataAfter.orientation, orientation)
         assert.ok(metadataAfter.icc, 'The color profile should be kept')
         if (lossless) assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
+      })
+    }
+
+    for (const [format, create] of [
+      ['jpeg', () => createPattern().jpeg({ quality: 100, chromaSubsampling: '4:4:4', optimiseCoding: false })],
+      ['png', () => createGradient().png({ compressionLevel: 0 })],
+      ['gif', () => createPattern().gif({ effort: 1 })],
+      ['webp', () => createPattern().webp({ lossless: true, effort: 0 })],
+      ['avif', () => createPattern().avif({ lossless: true, effort: 0 })]
+    ]) {
+      test(`Leaves ${format.toUpperCase()} images unchanged on repeat runs`, async () => {
+        const file = path.join(tempDir, `repeat.${format}`)
+        await create().toFile(file)
+        run([tempDir])
+        const after = fs.readFileSync(file)
+        run([tempDir])
+
+        assert.ok(after.equals(fs.readFileSync(file)), 'A repeat run should leave the file unchanged')
       })
     }
 

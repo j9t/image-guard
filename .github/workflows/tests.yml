@@ -20,6 +20,10 @@ jobs:
       matrix:
         platform: [ubuntu-latest]
         node: ["lts/*", "current"]
+        include:
+          # Windows: One LTS job is enough
+          - platform: windows-latest
+            node: "lts/*"
     name: "Node ${{ matrix.node }} (${{ matrix.platform }})"
     runs-on: ${{ matrix.platform }}
     steps:
@@ -53,15 +57,23 @@ jobs:
           # Not `npx`, which answers `--version` itself when the bin is missing
           out="$(node_modules/.bin/image-guard --version)"
           [ "$out" = "$version" ] || { echo "Unexpected output: $out" >&2; exit 1; }
+      - name: "Run through npm from PowerShell"
+        # Checks the README’s Windows setup, which has npm run commands through Git Bash
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          cd $env:RUNNER_TEMP
+          npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+          npm pkg set scripts.check="image-guard --version"
+          $out = npm run --silent check
+          if ($out -ne $version) { throw "Unexpected output: $out" }
 
-  # sharp and heic-decode ship native binaries, and the bin is a shell script
-  test-platforms:
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    strategy:
-      matrix:
-        platform: [macos-latest, windows-latest]
-    name: "Node lts/* (${{ matrix.platform }})"
-    runs-on: ${{ matrix.platform }}
+  # sharp and heic-decode ship native binaries
+  test-macos:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: "Node lts/* (macOS)"
+    runs-on: macos-latest
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v7
@@ -76,26 +88,3 @@ jobs:
         run: npm ci
       - name: "Run tests"
         run: npm test
-      - name: "Run as installed package"
-        # Calls the bin through bash, as Git hooks do (Command Prompt and PowerShell aren’t supported on Windows)
-        shell: bash
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          npm pack --pack-destination "$RUNNER_TEMP"
-          cd "$RUNNER_TEMP"
-          npm init -y
-          npm install ./image-guard-*.tgz
-          # Not `npx`, which answers `--version` itself when the bin is missing
-          out="$(node_modules/.bin/image-guard --version)"
-          [ "$out" = "$version" ] || { echo "Unexpected output: $out" >&2; exit 1; }
-      - name: "Run through npm from PowerShell"
-        # Checks the README’s Windows setup, which has npm run commands through Git Bash
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          cd $env:RUNNER_TEMP
-          npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
-          npm pkg set scripts.check="image-guard --version"
-          $out = npm run --silent check
-          if ($out -ne $version) { throw "Unexpected output: $out" }

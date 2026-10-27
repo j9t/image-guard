@@ -101,15 +101,21 @@ Options:
     return hits === 1 ? ' 1 image was skipped as already processed.' : ` ${hits} images were skipped as already processed.`
   }
 
-  // Share status
-  const summary = (run, includesConversion = false) => {
-    if (run) {
-      const action = includesConversion ? 'compression and conversion' : 'compression'
-      console.info(styleText(['bold'], `\nDefensive base ${action} completed. You saved ${utils.sizeReadable(savedKB)}.${noteCached()}`))
-    } else {
+  // Share status; dry runs tell what a real run would save
+  const summary = (run, includesConversion = false, partial = false) => {
+    if (!run) {
       const what = includesConversion ? 'images to compress or convert' : 'images to compress'
       console.info(styleText(['bold'], `There were no ${what}.`))
+      return
     }
+    const action = includesConversion ? 'compression and conversion' : 'compression'
+    const outcome = partial ? 'partially completed (some tasks failed)' : 'completed'
+    const size = utils.sizeReadable(savedBytes)
+    const status = argv.dry ? `Dry run ${outcome}.` : `Defensive base ${action} ${outcome}.`
+    let savings = argv.dry ? ` Defensive base ${action} would save ${size}.` : ` You saved ${size}.`
+    // Partial runs only mention savings if there are any
+    if (partial && savedBytes === 0) savings = ''
+    console.info(styleText(['bold'], `\n${status}${savings}${noteCached()}`))
   }
 
   if (argv['keep-heic'] && !argv['heic-to-avif']) {
@@ -122,7 +128,7 @@ Options:
     console.log(`(Search pattern: ${allTypes.join(', ')}${where})\n`)
   }
 
-  let savedKB = 0
+  let savedBytes = 0
 
   // Tiny in-house concurrency limiter
   const createLimiter = (concurrency) => {
@@ -180,10 +186,10 @@ Options:
 
   const processResults = (results, files) => {
     let hadFailures = false
-    let addedKB = 0
+    let addedBytes = 0
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
-        addedKB += r.value.saved
+        addedBytes += r.value.saved
         if (r.value.changed.length) changesBySource.set(files[i], r.value.changed)
       } else {
         hadFailures = true
@@ -194,7 +200,7 @@ Options:
         }
       }
     })
-    return { hadFailures, addedKB }
+    return { hadFailures, addedBytes }
   }
 
   const compress = async (files, dry) => {
@@ -203,8 +209,8 @@ Options:
     const tasks = files.map(file => limit(() => utils.compression(file, dry, argv.quiet, cache)))
     const results = await Promise.allSettled(tasks)
 
-    const { hadFailures, addedKB } = processResults(results, files)
-    savedKB += addedKB
+    const { hadFailures, addedBytes } = processResults(results, files)
+    savedBytes += addedBytes
     return hadFailures
   }
 
@@ -214,8 +220,8 @@ Options:
     const tasks = files.map(file => limit(() => utils.conversion(file, dry, keepOriginal, argv.quiet)))
     const results = await Promise.allSettled(tasks)
 
-    const { hadFailures, addedKB } = processResults(results, files)
-    savedKB += addedKB
+    const { hadFailures, addedBytes } = processResults(results, files)
+    savedBytes += addedBytes
     return hadFailures
   }
 
@@ -349,18 +355,6 @@ Options:
 
   if (!argv.dry) cache?.save()
 
-  if (hadFailures) {
-    process.exitCode = 1
-    if (totalFiles > 0) {
-      const action = doConversion ? 'compression and conversion' : 'compression'
-      const savings = `${savedKB > 0 ? ` You saved ${utils.sizeReadable(savedKB)}.` : ''}${noteCached()}`
-      console.info(styleText(['bold'], `\nDefensive base ${action} partially completed (some tasks failed).${savings}`))
-    } else {
-      summary(false, doConversion)
-    }
-  } else if (totalFiles > 0) {
-    summary(true, doConversion)
-  } else {
-    summary(false, doConversion)
-  }
+  if (hadFailures) process.exitCode = 1
+  summary(totalFiles > 0, doConversion, hadFailures)
 }

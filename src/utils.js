@@ -282,6 +282,11 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
     logMessage(`${status} ${filename} (${details})`, dry, color, quiet)
 
+    // Dry runs count what they would save, without changing anything
+    if (dry && fileSizeAfter < fileSizeBefore) {
+      return { saved: fileSizeBefore - fileSizeAfter, changed: [] }
+    }
+
     if (dry || !replacementSucceeded) {
       return noChange()
     }
@@ -384,9 +389,11 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
     logMessage(`Converted ${filename} → ${path.basename(avifPath)} (${sizeReadable(fileSizeBefore)} → ${sizeReadable(fileSizeAfter)})`, dry, 'cyan', quiet)
 
+    const saved = fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+
     if (dry) {
       await retryFileOperation(() => fs.unlink(avifPath))
-      return noChange()
+      return { saved, changed: [] }
     }
 
     // Delete original HEIC/HEIF file unless `--keep-heic` is set
@@ -395,7 +402,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
     }
 
     return {
-      saved: fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0,
+      saved,
       changed: keepOriginal ? [avifPath] : [avifPath, filename]
     }
 

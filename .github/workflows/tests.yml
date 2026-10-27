@@ -6,8 +6,6 @@ on:
     paths-ignore: ["**.md"]
   pull_request:
     paths-ignore: ["**.md"]
-  # @@ Remove once the Windows run on fix/fidelity is confirmed
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -57,7 +55,7 @@ jobs:
 
   # sharp and heic-decode ship native binaries, and the bin is a shell script
   test-platforms:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     strategy:
       matrix:
         platform: [macos-latest, windows-latest]

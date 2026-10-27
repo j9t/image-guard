@@ -8,6 +8,8 @@ import { styleText } from 'node:util'
 import decode from 'heic-decode'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100 MB
+// Limits palette reduction, as checking it holds two decoded copies of the image (320 MB at the limit)
+const MAX_PIXELS_QUANTIZED = 40 * 1000 * 1000 // 40 megapixels
 
 // Compression configuration for each format (as sharp names them)
 const formatConfigs = {
@@ -16,8 +18,13 @@ const formatConfigs = {
     settings: { quality: 100 }
   },
   png: {
-    options: { pages: -1 },
-    settings: { animated: true, compressionLevel: 9, quality: 100 } // Still waiting for APNG support though (`animated` doesn’t seem to have an effect), https://github.com/lovell/sharp/issues/2375
+    options: {},
+    settings: { compressionLevel: 9 },
+    // Lossless for images that already use a palette
+    settingsPalette: { palette: true, quality: 100, dither: 0, effort: 10 },
+    // Reduces other images to 256 colors, kept only where that doesn’t visibly change them
+    // (effort 7 being as small and as close to the original as 10, in two-thirds of the time)
+    settingsQuantized: { palette: true, quality: 100, effort: 7 }
   },
   gif: {
     options: { pages: -1 },
@@ -40,10 +47,114 @@ const formatConfigs = {
   }
 }
 
+// Checks the profile description, as sRGB profiles only add bytes (sRGB being
+// what images without a profile are taken to be)
+const isSrgbProfile = (icc) => {
+  try {
+    const count = icc.readUInt32BE(128)
+    for (let i = 0; i < count; i++) {
+      const entry = 132 + i * 12
+      if (icc.toString('latin1', entry, entry + 4) !== 'desc') continue
+      const offset = icc.readUInt32BE(entry + 4)
+      // Removing null bytes covers both ASCII and UTF-16 descriptions
+      return icc.toString('latin1', offset, offset + icc.readUInt32BE(entry + 8)).replaceAll('\0', '').includes('sRGB')
+    }
+  } catch {
+    // Malformed profiles are kept
+  }
+  return false
+}
+
+// Keeps what affects how the image looks—orientation, color profile, CMYK, grayscale, and
+// high bit depth—while dropping all other metadata
+const createPipeline = (input, format, metadata, quantize = false) => {
+  const { options, settings, settingsPalette, settingsQuantized } = formatConfigs[format]
+  const settingsImage = quantize ? settingsQuantized : metadata.isPalette && settingsPalette ? settingsPalette : settings
+  let pipeline = sharp(input, options)
+  if (metadata.icc && !isSrgbProfile(metadata.icc)) pipeline = pipeline.keepIccProfile()
+  if (metadata.orientation > 1) pipeline = pipeline.withExif({ IFD0: { Orientation: String(metadata.orientation) } })
+  if (metadata.space === 'cmyk') pipeline = pipeline.pipelineColourspace('cmyk').toColourspace('cmyk')
+  if (format === 'png' && !quantize && (metadata.bitsPerSample > 8 || metadata.space === 'b-w')) {
+    return pipeline.toColourspace(metadata.space).toFormat(format, settingsImage)
+  }
+  if (format === 'avif' && metadata.bitsPerSample > 8) {
+    return pipeline.toColourspace(metadata.space).toFormat(format, { ...settingsImage, bitdepth: metadata.bitsPerSample })
+  }
+  return pipeline.toFormat(format, settingsImage)
+}
+
+// Compares lightly blurred pixels, so that dithering, which the eye blends, counts less than
+// shifted colors and blotches—overall, and in every 16×16 area, so that small changes, like
+// icons losing their color, count, too; the limits follow a visual review, in which established
+// metrics (SSIMULACRA2, DSSIM, SSIM) predicted visible changes less well
+const isVisiblySame = async (input, output) => {
+  const read = (data) => sharp(data).toColourspace('srgb').ensureAlpha().blur(1).raw().toBuffer({ resolveWithObject: true })
+  const [{ data: pixelsInput, info: { width, height } }, { data: pixelsOutput }] = await Promise.all([read(input), read(output)])
+  // Counts differences by value, as sorting them would hold up other images for longer
+  const histogram = new Uint32Array(256)
+  // Sums differences in 8×8 cells, of which 2×2 make up an area
+  const widthCells = Math.ceil(width / 8)
+  const heightCells = Math.ceil(height / 8)
+  const cells = new Float64Array(widthCells * heightCells)
+  let sum = 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      // Weighs colors by opacity, as colors of transparent pixels don’t show
+      const alphaInput = pixelsInput[i + 3]
+      const alphaOutput = pixelsOutput[i + 3]
+      let diff = Math.abs(alphaInput - alphaOutput) * 255
+      for (let c = i; c < i + 3; c++) {
+        const diffColor = Math.abs(pixelsInput[c] * alphaInput - pixelsOutput[c] * alphaOutput)
+        if (diffColor > diff) diff = diffColor
+      }
+      histogram[(diff / 255) | 0]++
+      sum += diff / 255
+      cells[(y >> 3) * widthCells + (x >> 3)] += diff / 255
+    }
+  }
+  const count = width * height
+  // The difference that 99.9% of pixels stay within
+  let seen = 0
+  let diffTop = 0
+  while ((seen += histogram[diffTop]) <= Math.floor(count * 0.999)) diffTop++
+  // The largest average difference of an area, with areas overlapping by half
+  let diffArea = 0
+  for (let y = 0; y < heightCells - 1; y++) {
+    for (let x = 0; x < widthCells - 1; x++) {
+      const k = y * widthCells + x
+      const diffAverage = (cells[k] + cells[k + 1] + cells[k + widthCells] + cells[k + widthCells + 1]) / 256
+      if (diffAverage > diffArea) diffArea = diffAverage
+    }
+  }
+  return sum / count <= 3 && diffTop <= 20 && diffArea <= 5.5
+}
+
+// Reduces PNG images to 256 colors where that doesn’t visibly change them—once reduced, they
+// use a palette, which later runs keep losslessly—and compresses all other images as configured
+const encode = async (input, format) => {
+  const metadata = await sharp(input).metadata()
+  // Leaves out grayscale images, as palettes don’t make 8-bit ones smaller, and 16-bit images,
+  // whose precision the comparison can’t see
+  if (format === 'png' && !metadata.isPalette && metadata.channels > 1 && !(metadata.bitsPerSample > 8) && metadata.width * metadata.height <= MAX_PIXELS_QUANTIZED) {
+    const output = await createPipeline(input, format, metadata, true).toBuffer()
+    // Gives way to lossless compression where dithering makes images larger, as in some screenshots
+    if (output.length < input.length && await isVisiblySame(input, output)) return output
+  }
+  return createPipeline(input, format, metadata).toBuffer()
+}
+
+// Detects APNG images, of which libvips would keep only the first frame
+const isAnimatedPng = (data) => {
+  const actl = data.indexOf('acTL')
+  const idat = data.indexOf('IDAT')
+  return actl !== -1 && (idat === -1 || actl < idat)
+}
+
 export const hash = (data) => createHash('sha256').update(data).digest('hex')
 
 // Identifies what compression results depend on, to tell when recorded results no longer apply
-const fingerprint = hash(JSON.stringify({ formatConfigs, versions: sharp.versions })).slice(0, 16)
+const fingerprint = hash(JSON.stringify({ formatConfigs, MAX_PIXELS_QUANTIZED, pipeline: [encode, createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects
@@ -71,6 +182,9 @@ const retryFileOperation = async (operation, maxRetries = 5, delayMs = 100) => {
   }
 }
 
+// Bytes saved, and the paths written or removed (for staging)
+const noChange = () => ({ saved: 0, changed: [] })
+
 const compression = async (filename, dry, quiet = false, cache) => {
   const filenameBackup = `${filename}.bak`
   const fileSizeBefore = await size(filename)
@@ -79,12 +193,12 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
   if (fileSizeBefore === 0) {
     logMessage(`Skipped ${filename} (${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (fileSizeBefore > MAX_FILE_SIZE) {
     logMessage(`Skipped ${filename} (file too large: ${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   // Place temp file next to the original to maximize same-device atomic rename
@@ -103,8 +217,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
     }
 
     const outputFormat = ext === 'jpg' ? 'jpeg' : ext // sharp uses “jpeg” instead of “jpg”
-    const config = formatConfigs[outputFormat]
-    if (!config) {
+    if (!formatConfigs[outputFormat]) {
       throw new Error(`Unsupported file type for ${filename}`)
     }
 
@@ -115,12 +228,15 @@ const compression = async (filename, dry, quiet = false, cache) => {
     const entryInput = cache ? toEntry(input) : undefined
     if (cache?.has(entryInput)) {
       logMessage(`Skipped ${filename} (already processed)`, dry, 'white', quiet)
-      return 0
+      return noChange()
     }
 
-    const output = await sharp(input, config.options)
-      .toFormat(outputFormat, config.settings)
-      .toBuffer()
+    if (outputFormat === 'png' && isAnimatedPng(input)) {
+      logMessage(`Skipped ${filename} (animated PNG)`, dry, 'yellow', quiet)
+      return noChange()
+    }
+
+    const output = await encode(input, outputFormat)
     const fileSizeAfter = output.length
     if (fileSizeAfter === 0) {
       throw new Error('Compressed file size is 0')
@@ -166,11 +282,11 @@ const compression = async (filename, dry, quiet = false, cache) => {
 
     logMessage(`${status} ${filename} (${details})`, dry, color, quiet)
 
-    if (dry) {
-      return 0
+    if (dry || !replacementSucceeded) {
+      return noChange()
     }
 
-    return fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+    return { saved: fileSizeBefore - fileSizeAfter, changed: [filename] }
 
   } catch (err) {
 
@@ -179,6 +295,7 @@ const compression = async (filename, dry, quiet = false, cache) => {
     if (msg.includes('corrupt header') ||
       msg.includes('unexpected end of') ||
       msg.includes('invalid image') ||
+      msg.includes('unsupported image format') ||
       msg.includes('gifload:') ||
       msg.includes('pngload:') ||
       msg.includes('jpegload:') ||
@@ -186,10 +303,9 @@ const compression = async (filename, dry, quiet = false, cache) => {
       msg.includes('avifload:')
     ) {
       logMessage(`Skipped ${filename} (corrupt file)`, dry, 'yellow', quiet)
-    } else {
-      console.error(styleStderr('red', `Error compressing ${filename}:`), err)
+      return noChange()
     }
-    return 0
+    throw new Error(`Error compressing ${filename}`, { cause: err })
 
   } finally {
 
@@ -229,17 +345,17 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
   if (fileSizeBefore === 0) {
     logMessage(`Skipped ${filename} (${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (fileSizeBefore > MAX_FILE_SIZE) {
     logMessage(`Skipped ${filename} (file too large: ${sizeReadable(fileSizeBefore)})`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   if (!/\.hei[cf]$/i.test(filename)) {
     logMessage(`Skipped ${filename} (not a HEIC/HEIF file)`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   }
 
   const avifPath = filename.replace(/\.hei[cf]$/i, '.avif')
@@ -248,7 +364,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
   try {
     await fs.access(avifPath)
     logMessage(`Skipped ${filename} (${path.basename(avifPath)} already exists)`, dry, 'yellow', quiet)
-    return 0
+    return noChange()
   } catch {
     // File does not exist—proceed with conversion
   }
@@ -270,7 +386,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
     if (dry) {
       await retryFileOperation(() => fs.unlink(avifPath))
-      return 0
+      return noChange()
     }
 
     // Delete original HEIC/HEIF file unless `--keep-heic` is set
@@ -278,7 +394,10 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
       await retryFileOperation(() => fs.unlink(filename))
     }
 
-    return fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+    return {
+      saved: fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0,
+      changed: keepOriginal ? [avifPath] : [avifPath, filename]
+    }
 
   } catch (err) {
     // Clean up partial AVIF if it was created
@@ -295,10 +414,9 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
       err.message.includes('HEIF image not found')
     )) {
       logMessage(`Skipped ${filename} (corrupt or unsupported HEIC/HEIF file)`, dry, 'yellow', quiet)
-    } else {
-      console.error(styleStderr('red', `Error converting ${filename}:`), err)
+      return noChange()
     }
-    return 0
+    throw new Error(`Error converting ${filename}`, { cause: err })
   }
 }
 

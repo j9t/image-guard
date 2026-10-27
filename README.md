@@ -8,11 +8,15 @@ Image Guard takes care of near-lossless compression of your images, to help you 
 
 It’s convenient because setup is simple. Run it right away—done. Or install, run, add hook—done.
 
-It’s as safe as possible because compression happens losslessly (near-lossless for JPG and GIF images). That allows you to stop worrying about forgetting to compress images, but also about sacrificing too much quality. (You can take care of additional optimizations manually or through other tooling.)
+It’s as safe as possible because compression happens losslessly (near-lossless for PNG, JPG, and GIF images). That allows you to stop worrying about forgetting to compress images, but also about sacrificing too much quality. (You can take care of additional optimizations manually or through other tooling.)
 
 ## Installation and Use
 
-(Note available parameters below.)
+On Windows, Image Guard needs Git Bash, which comes with [Git for Windows](https://gitforwindows.org/). Git hooks use it already. For npx and npm scripts (from any shell, including PowerShell), have npm use Git Bash, too:
+
+```shell
+npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+```
 
 ### Ways to Use Image Guard
 
@@ -103,7 +107,7 @@ npm pkg set scripts.postprepare="grep -qxF './node_modules/.bin/image-guard --st
 
 If you give the hook options like `--ignore`, add them to the `postprepare` script as well—the hook command is the only place to configure Image Guard, and the next install rewrites that line.
 
-**Important:** When you commit images that have not yet been compressed, the automated compression process (triggered by the pre-commit hook) will modify those image files to reduce their size. As a result, after your initial commit attempt, you will see these images appear as changed files in Git. To include the optimized images in your repository, you need to stage and commit them again. In rare cases, if further compression is possible, you may need to repeat this process until no further changes are detected. This workflow is intentional and ensures that only optimally compressed images are committed. Many editors can display diffs for images, helping you review these changes.
+**Important:** When you commit images that have not yet been compressed, the pre-commit hook compresses them and stages the result, so the commit includes the compressed images. Images with changes you haven’t staged are the exception: Image Guard compresses them, too, but leaves them unstaged (and says so), so as not to commit changes you held back. Many editors can display diffs for images, helping you review these changes.
 
 ### Parameters
 
@@ -119,7 +123,7 @@ Image Guard takes an optional path to the directory to process—`npx image-guar
 
 * `--dry`/`-d` allows you to run Image Guard in “dry mode.” All changes are shown in the terminal (unless combined with `--quiet`, which leaves just the summary).
 
-* `--staged` (recommended with automated use) triggers a mode that watches PNG, JPG, GIF, WebP, and AVIF files (and HEIC/HEIF, when `--heic-to-avif` is used) from staged changes (`git diff --cached`) and only processes those files—that approach makes Image Guard more efficient in operation. Because the file set comes from Git, `--staged` can’t be combined with a path.
+* `--staged` (recommended with automated use) triggers a mode that watches PNG, JPG, GIF, WebP, and AVIF files (and HEIC/HEIF, when `--heic-to-avif` is used) from staged changes (`git diff --cached`) and only processes those files—that approach makes Image Guard more efficient in operation. It then stages the compressed (and converted) images. Because the file set comes from Git, `--staged` can’t be combined with a path.
 
 * `--no-cache` processes all images, including those recorded as already processed (see [“Record of Processed Images”](#record-of-processed-images)).
 
@@ -146,6 +150,12 @@ Image Guard is a Node script that uses [sharp](https://www.npmjs.com/package/sha
 
 Automated compression works by monitoring whether a given [change list](https://webglossary.info/terms/change-list/) includes any PNGs, JPGs, GIFs, WebPs, or AVIFs (and HEIC/HEIF when opted in). It’s initiated by a Git hook. Only those images are compressed where there is an improvement. HEIC conversion uses [heic-decode](https://www.npmjs.com/package/heic-decode) for patent-free decoding and sharp for lossy AVIF encoding (quality 80). The processed images can then be committed to the underlying repository.
 
+Compression removes metadata, except for what affects how an image looks: its orientation, its color profile (unless that’s sRGB, which browsers assume anyway), CMYK color, and the bit depth of AVIF images.
+
+PNG images with more than 256 colors are reduced to 256 colors (with dithering) where that makes them smaller and a comparison with the original shows no visible change. Other PNG images, like most photos, grayscale and 16-bit images, images with smooth gradients or small elements in rare colors, and images over 40 megapixels, are compressed losslessly, keeping their bit depth.
+
+Animated PNGs (APNG) are skipped, as sharp would keep only their first frame.
+
 Through this approach, though glossed over here, Image Guard makes up for what’s missing or complicated in other packages, namely easy, near-riskless, automatable, resource-friendly in-repo optimization.
 
 ### Record of Processed Images
@@ -158,7 +168,7 @@ The record is kept in node_modules/.cache/image-guard of the project being proce
 
 You use Image Guard when you need a simple, automatable, robust solution to compress images in a way that limits unnecessary image payload right from the start, in your repositories, and that reduces the risk that entirely uncompressed images go into production.
 
-As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. (Lossless compression is not possible for every image format, however, so there’s a risk when excessively iterating over the same images. Doing so may eventually degrade quality. The [record of processed images](#record-of-processed-images) prevents this, unless it’s bypassed or cleared.)
+As Image Guard compresses near-losslessly, there’s little risk of quality issues from compression. Repeat runs don’t degrade quality further, even when the [record of processed images](#record-of-processed-images) is bypassed or cleared.
 
 ## What Does Image Guard _Not_ Do?
 

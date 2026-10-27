@@ -1116,6 +1116,18 @@ describe('Image Guard', () => {
       assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
     })
 
+    test('Keeps PNG images above 40 megapixels lossless', async () => {
+      const file = path.join(tempDir, 'large.png')
+      // 320 bands of similar shades, which a palette renders without visible change
+      const bands = Buffer.alloc(320 * 3)
+      for (let i = 0; i < 320; i++) bands.set([100 + i % 20, 120 + Math.floor(i / 20), 140], i * 3)
+      await sharp(bands, { raw: { width: 1, height: 320, channels: 3 } }).resize(6400, 6400, { kernel: 'nearest' }).png({ compressionLevel: 1 }).toFile(file)
+      const { stdout } = run([tempDir])
+
+      assert.match(stdout, /Compressed .*large\.png/)
+      assert.strictEqual((await metadata(file)).isPalette, false)
+    })
+
     test('Compresses PNG images losslessly where a palette would make them larger', async () => {
       const file = path.join(tempDir, 'subtle.png')
       const width = 320
@@ -1182,9 +1194,9 @@ describe('Image Guard', () => {
       assert.ok(before.equals(await pixels(file)), 'Pixels should be unchanged')
     })
 
-    test('Keeps the bit depth of 16-bit PNG images where a palette would visibly change them', async () => {
+    test('Keeps 16-bit PNG images lossless, even where a palette wouldn’t visibly change them', async () => {
       const file = path.join(tempDir, 'deep.png')
-      await createPattern().toColourspace('rgb16').png({ compressionLevel: 0 }).toFile(file)
+      await createGradient().toColourspace('rgb16').png({ compressionLevel: 0 }).toFile(file)
       const before = await pixels(file)
       const { stdout } = run([tempDir])
 

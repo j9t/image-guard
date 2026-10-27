@@ -8,6 +8,8 @@ import { styleText } from 'node:util'
 import decode from 'heic-decode'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100 MB
+// Limits palette reduction, as checking it holds two decoded copies of the image (320 MB at the limit)
+const MAX_PIXELS_QUANTIZED = 40 * 1000 * 1000 // 40 megapixels
 
 // Compression configuration for each format (as sharp names them)
 const formatConfigs = {
@@ -132,8 +134,9 @@ const isVisiblySame = async (input, output) => {
 // use a palette, which later runs keep losslessly—and compresses all other images as configured
 const encode = async (input, format) => {
   const metadata = await sharp(input).metadata()
-  // Leaves out grayscale images, as palettes don’t make 8-bit ones smaller
-  if (format === 'png' && !metadata.isPalette && metadata.channels > 1) {
+  // Leaves out grayscale images, as palettes don’t make 8-bit ones smaller, and 16-bit images,
+  // whose precision the comparison can’t see
+  if (format === 'png' && !metadata.isPalette && metadata.channels > 1 && !(metadata.bitsPerSample > 8) && metadata.width * metadata.height <= MAX_PIXELS_QUANTIZED) {
     const output = await createPipeline(input, format, metadata, true).toBuffer()
     // Gives way to lossless compression where dithering makes images larger, as in some screenshots
     if (output.length < input.length && await isVisiblySame(input, output)) return output
@@ -151,7 +154,7 @@ const isAnimatedPng = (data) => {
 export const hash = (data) => createHash('sha256').update(data).digest('hex')
 
 // Identifies what compression results depend on, to tell when recorded results no longer apply
-const fingerprint = hash(JSON.stringify({ formatConfigs, pipeline: [encode, createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
+const fingerprint = hash(JSON.stringify({ formatConfigs, MAX_PIXELS_QUANTIZED, pipeline: [encode, createPipeline, isSrgbProfile, isVisiblySame].map(String), versions: sharp.versions })).slice(0, 16)
 
 // `styleText` detects color on `process.stdout` by default, so anything bound
 // for STDERR has to name that stream—otherwise a redirected STDERR collects

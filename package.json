@@ -57,8 +57,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
-    "test": "node --test bin/image-guard.test.js benchmark/benchmark.test.js"
+    "test": "node --test test/*.test.js benchmark/*.test.js"
   },
   "type": "module",
-  "version": "5.6.0"
+  "version": "5.6.1"
 }

@@ -4,6 +4,18 @@ Starting with version 5.2.0, all notable changes to Image Guard are documented i
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.1] - 2026-10-28
+
+### Fixed
+
+* Ensured dry runs report what a real run would save (rather than “0.00 KB”) and say that nothing was saved (“Dry run completed. Defensive base compression would save…”)
+* Ensured `--staged` runs that fail before finding images (e.g., outside a Git repository) no longer claim there were no images to compress
+
+### Changed
+
+* Noted in the summary how many HEIC/HEIF originals `--keep-heic` kept, as backups that the savings leave out
+* Sped up tests (around 6× faster), through smaller AVIF and animated WebP test images, and by splitting the tests into files that run in parallel
+
 ## [5.6.0] - 2026-10-27
 
 ### Fixed

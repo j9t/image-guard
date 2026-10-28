@@ -37,7 +37,11 @@ describe('Staged images', () => {
 
   test('Fails outside a Git repository without claiming there were no images', () => {
     const dirOutside = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-no-repo-'))
-    const { status, stdout } = run([], { cwd: dirOutside })
+    // Keeps Git from finding a repository above the folder or through the environment
+    const env = { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(dirOutside) }
+    delete env.GIT_DIR
+    delete env.GIT_WORK_TREE
+    const { status, stdout } = run([], { cwd: dirOutside, env })
     fs.rmSync(dirOutside, { recursive: true, force: true })
 
     assert.strictEqual(status, 1)

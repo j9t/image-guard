@@ -182,7 +182,8 @@ const retryFileOperation = async (operation, maxRetries = 5, delayMs = 100) => {
   }
 }
 
-// Bytes saved, and the paths written or removed (for staging)
+// Bytes saved, and the paths written or removed (for staging);
+// conversions also report originals kept
 const noChange = () => ({ saved: 0, changed: [] })
 
 const compression = async (filename, dry, quiet = false, cache) => {
@@ -389,11 +390,13 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
     logMessage(`Converted ${filename} → ${path.basename(avifPath)} (${sizeReadable(fileSizeBefore)} → ${sizeReadable(fileSizeAfter)})`, dry, 'cyan', quiet)
 
+    // Originals kept with `--keep-heic` are backups, so they don’t count against the savings
     const saved = fileSizeAfter < fileSizeBefore ? fileSizeBefore - fileSizeAfter : 0
+    const kept = keepOriginal ? 1 : 0
 
     if (dry) {
       await retryFileOperation(() => fs.unlink(avifPath))
-      return { saved, changed: [] }
+      return { saved, kept, changed: [] }
     }
 
     // Delete original HEIC/HEIF file unless `--keep-heic` is set
@@ -403,6 +406,7 @@ const conversion = async (filename, dry, keepOriginal, quiet = false) => {
 
     return {
       saved,
+      kept,
       changed: keepOriginal ? [avifPath] : [avifPath, filename]
     }
 

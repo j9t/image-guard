@@ -25,7 +25,10 @@ describe('Staged images', () => {
 
   test('Compresses only staged images', async () => {
     copyFiles(testFolder, tempDir)
-    await git.add('.')
+    const fileUnstaged = path.join(tempDir, 'unstaged.png')
+    fs.copyFileSync(path.join(testFolder, 'test.png'), fileUnstaged)
+    await git.add(['.', ':!unstaged.png'])
+    const unstagedBefore = fs.statSync(fileUnstaged)
     run([], { cwd: tempDir })
 
     const { allCompressed, uncompressedFiles } = areImagesCompressed(tempDir)
@@ -33,6 +36,9 @@ describe('Staged images', () => {
       console.log('The following files were not compressed:', uncompressedFiles.join(', '))
     }
     assert.strictEqual(allCompressed, true)
+    const unstagedAfter = fs.statSync(fileUnstaged)
+    assert.strictEqual(unstagedAfter.size, unstagedBefore.size, 'Unstaged image should be untouched')
+    assert.strictEqual(unstagedAfter.mtime.getTime(), unstagedBefore.mtime.getTime())
   })
 
   test('Fails outside a Git repository without claiming there were no images', () => {

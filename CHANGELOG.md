@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+* Noted in the summary how many HEIC/HEIF originals `--keep-heic` kept, as backups that the savings leave out
 * Sped up tests (around 6× faster), through smaller AVIF and animated WebP test images, and by splitting the tests into files that run in parallel
 
 ## [5.6.0] - 2026-10-27

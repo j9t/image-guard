@@ -334,6 +334,10 @@ describe('Image Guard', () => {
       fs.unlinkSync(avifFile)
     }
 
+    // HEIF files are found through their own extension
+    const heifFile = path.join(tempTestFolder, 'other.heif')
+    fs.copyFileSync(heicFile, heifFile)
+
     const originalCwd = process.cwd()
     try {
       process.chdir(tempDir)
@@ -353,6 +357,8 @@ describe('Image Guard', () => {
 
     // Original HEIC should be deleted
     assert.strictEqual(fs.existsSync(heicFile), false, 'Original HEIC should be deleted')
+    assert.strictEqual(fs.existsSync(path.join(tempTestFolder, 'other.avif')), true, 'HEIF file should be converted, too')
+    assert.strictEqual(fs.existsSync(heifFile), false, 'Original HEIF should be deleted')
 
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
@@ -378,6 +384,19 @@ describe('Image Guard', () => {
     assert.strictEqual(fs.existsSync(heicFile), true, 'HEIC file should be preserved with `--keep-heic`')
 
     fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  test('Reports savings without the HEIC files kept with `--keep-heic`, and notes them', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-guard-keep-heic-savings-'))
+    fs.copyFileSync(path.join(testFolder, 'test.heic'), path.join(tempDir, 'test.heic'))
+
+    // The dry run goes first, as the real run leaves an AVIF file that later runs skip the HEIC file for
+    const outputs = [['--dry'], []].map(args => execFileSync(process.execPath, [imageGuardScript, '--heic-to-avif', '--keep-heic', ...args, tempDir], { cwd: os.tmpdir(), encoding: 'utf8' }))
+
+    fs.rmSync(tempDir, { recursive: true, force: true })
+
+    assert.match(outputs[0], /would save [1-9]\d*\.\d{2}\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./)
+    assert.match(outputs[1], /You saved [1-9]\d*\.\d{2}\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./)
   })
 
   test('Ensures dry run does not convert HEIC files but reports sizes', () => {

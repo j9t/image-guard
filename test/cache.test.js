@@ -103,7 +103,9 @@ describe('Record of processed images', () => {
     fs.rmSync(path.join(tempTestFolder, 'test.JPEG'))
     run([tempTestFolder])
     const [fileRecord] = fs.readdirSync(dirCache)
-    fs.renameSync(path.join(dirCache, fileRecord), path.join(dirCache, `other-${fileRecord}`))
+    // Changes one character of the fingerprint, as another version or setting would
+    const fileRecordOther = `${fileRecord[0] === '0' ? '1' : '0'}${fileRecord.slice(1)}`
+    fs.renameSync(path.join(dirCache, fileRecord), path.join(dirCache, fileRecordOther))
     const stdout = run([tempTestFolder])
 
     assert.doesNotMatch(stdout, /already processed/)

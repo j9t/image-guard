@@ -56,7 +56,7 @@ Arguments:
 
 Options:
       --heic-to-avif    Also convert HEIC/HEIF files to AVIF
-      --keep-heic       Keep the original HEIC/HEIF files (only with \`--heic-to-avif\`)
+      --keep-heic       Keep the original HEIC/HEIF files as backups (only with \`--heic-to-avif\`)
   -i, --ignore <paths>  Comma-separated paths or glob patterns to exclude
   -q, --quiet           Print only the final summary
   -d, --dry             Show what would change without writing any files
@@ -112,7 +112,10 @@ Options:
     const outcome = partial ? 'partially completed (some tasks failed)' : 'completed'
     const size = utils.sizeReadable(savedBytes)
     const status = argv.dry ? `Dry run ${outcome}.` : `Defensive base ${action} ${outcome}.`
-    let savings = argv.dry ? ` Defensive base ${action} would save ${size}.` : ` You saved ${size}.`
+    const noteKept = keptOriginals === 0
+      ? ''
+      : keptOriginals === 1 ? ' (not counting 1 HEIC/HEIF original kept as a backup)' : ` (not counting ${keptOriginals} HEIC/HEIF originals kept as backups)`
+    let savings = argv.dry ? ` Defensive base ${action} would save ${size}${noteKept}.` : ` You saved ${size}${noteKept}.`
     // Partial runs only mention savings if there are any
     if (partial && savedBytes === 0) savings = ''
     console.info(styleText(['bold'], `\n${status}${savings}${noteCached()}`))
@@ -129,6 +132,7 @@ Options:
   }
 
   let savedBytes = 0
+  let keptOriginals = 0
 
   // Tiny in-house concurrency limiter
   const createLimiter = (concurrency) => {
@@ -222,6 +226,7 @@ Options:
 
     const { hadFailures, addedBytes } = processResults(results, files)
     savedBytes += addedBytes
+    keptOriginals += results.filter(r => r.status === 'fulfilled' && r.value.kept).length
     return hadFailures
   }
 

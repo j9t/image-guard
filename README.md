@@ -115,7 +115,7 @@ Image Guard takes an optional path to the directory to process—`npx image-guar
 
 * `--heic-to-avif` converts HEIC/HEIF files to AVIF. Because HEIC sources are already lossy-compressed (HEVC), the conversion uses lossy AVIF encoding (quality 80) to produce files smaller than the originals at near-identical visual quality. Original HEIC/HEIF files are deleted after conversion by default. (Note: The conversion maps Display P3 colors—common on iPhones—to sRGB, which may result in slightly less vivid colors.)
 
-  - `--keep-heic` (used with `--heic-to-avif`) preserves the original HEIC/HEIF files instead of deleting them after conversion.
+  - `--keep-heic` (used with `--heic-to-avif`) preserves the original HEIC/HEIF files instead of deleting them after conversion. As these are meant as backups, savings leave them out (the summary notes how many were kept).
 
 * `--ignore`/`-i` allows you to specify paths to be ignored (as in `--ignore=example,test`). Multiple paths must be separated by commas. Naming a directory excludes everything inside it. The option supports glob patterns (e.g., `assets/**`, `**/*.png`); matching is case-insensitive and honors .gitignore. Patterns are relative to the directory being processed—with `--staged`, to the repository root.
 

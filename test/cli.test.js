@@ -392,11 +392,15 @@ describe('Image Guard', () => {
 
     // The dry run goes first, as the real run leaves an AVIF file that later runs skip the HEIC file for
     const outputs = [['--dry'], []].map(args => execFileSync(process.execPath, [imageGuardScript, '--heic-to-avif', '--keep-heic', ...args, tempDir], { cwd: os.tmpdir(), encoding: 'utf8' }))
+    const sizeDifference = fs.statSync(path.join(tempDir, 'test.heic')).size - fs.statSync(path.join(tempDir, 'test.avif')).size
 
     fs.rmSync(tempDir, { recursive: true, force: true })
 
-    assert.match(outputs[0], /would save [1-9]\d*\.\d{2}\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./)
-    assert.match(outputs[1], /You saved [1-9]\d*\.\d{2}\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./)
+    const [, savingsDry] = outputs[0].match(/would save (\d+\.\d{2})\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./) ?? []
+    const [, savingsReal] = outputs[1].match(/You saved (\d+\.\d{2})\sKB \(not counting 1 HEIC\/HEIF original kept as a backup\)\./) ?? []
+    assert.ok(sizeDifference > 0, 'The AVIF file should be smaller than the HEIC file')
+    assert.strictEqual(savingsReal, (sizeDifference / 1024).toFixed(2), 'Savings should be the difference between the HEIC and the AVIF file')
+    assert.strictEqual(savingsDry, savingsReal, 'Dry run should report the savings of a real run')
   })
 
   test('Ensures dry run does not convert HEIC files but reports sizes', () => {

@@ -112,12 +112,13 @@ Options:
     const outcome = partial ? 'partially completed (some tasks failed)' : 'completed'
     const size = utils.sizeReadable(savedBytes)
     const status = argv.dry ? `Dry run ${outcome}.` : `Defensive base ${action} ${outcome}.`
-    const noteKept = keptOriginals === 0
-      ? ''
-      : keptOriginals === 1 ? ' (not counting 1 HEIC/HEIF original kept as a backup)' : ` (not counting ${keptOriginals} HEIC/HEIF originals kept as backups)`
+    const originals = keptOriginals === 1 ? '1 HEIC/HEIF original' : `${keptOriginals} HEIC/HEIF originals`
+    const backups = keptOriginals === 1 ? 'a backup' : 'backups'
+    const noteKept = keptOriginals === 0 ? '' : ` (not counting ${originals} kept as ${backups})`
     let savings = argv.dry ? ` Defensive base ${action} would save ${size}${noteKept}.` : ` You saved ${size}${noteKept}.`
-    // Partial runs only mention savings if there are any
-    if (partial && savedBytes === 0) savings = ''
+    // Partial runs only mention savings if there are any,
+    // but always note HEIC/HEIF backups
+    if (partial && savedBytes === 0) savings = keptOriginals === 0 ? '' : ` Kept ${originals} as ${backups}.`
     console.info(styleText(['bold'], `\n${status}${savings}${noteCached()}`))
   }
 

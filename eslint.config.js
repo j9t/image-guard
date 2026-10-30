@@ -4,15 +4,12 @@ import globals from 'globals';
 export default [
   {
     ignores: [
-      'media/',
-      'node_modules/**'
+      'media/'
     ]
   },
   js.configs.recommended,
   {
     languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
       globals: globals.node
     },
     rules: {

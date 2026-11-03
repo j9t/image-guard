@@ -210,6 +210,6 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 You might like some of my other work:
 
-* Optimization tools: [hihtml](https://github.com/j9t/hihtml) · [HTML Minifier Next](https://github.com/j9t/html-minifier-next) · [ObsoHTML](https://github.com/j9t/obsohtml) · [CSS Dedup](https://github.com/j9t/css-dedup) · Image Guard · [Compressor.js Next](https://github.com/j9t/compressorjs-next) · [.htaccess Punk](https://github.com/j9t/htaccess-punk)
+* Optimization tools: [hihtml](https://github.com/j9t/hihtml) · [HTML Minifier](https://github.com/j9t/html-minifier) · [ObsoHTML](https://github.com/j9t/obsohtml) · [CSS Dedup](https://github.com/j9t/css-dedup) · Image Guard · [Compressor.js Next](https://github.com/j9t/compressorjs-next) · [.htaccess Punk](https://github.com/j9t/htaccess-punk)
 * Defense tools: [IA Defensa](https://iadefensa.com/solutions/)
-* Resources for quality web development: [Articles](https://meiert.com/topics/development/) · [Books](https://meiert.com/topics/books/) (including [_On Web Development_](https://meiert.com/blog/on-web-development-2/)) · [News](https://frontenddogma.com/) · [Terminology](https://webglossary.info/)
+* Resources for quality web development: [Articles](https://meiert.com/topics/development/) · [Books](https://meiert.com/topics/books/) (e.g., [_On Web Development_](https://meiert.com/blog/on-web-development-2/)) · [News](https://frontenddogma.com/) · [Terminology](https://webglossary.info/)

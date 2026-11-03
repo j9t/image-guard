@@ -6,4 +6,4 @@ Only the latest and therefore current version of Image Guard is supported. It’
 
 ## Reporting a Vulnerability
 
-To report a vulnerability, please use [GitHub’s private security advisories](https://github.com/j9t/image-guard/security/advisories/new) or email info@meiert.com directly. Do not report vulnerabilities via public issues.
+To report a vulnerability, please use [GitHub’s private security advisories](https://github.com/j9t/image-guard/security/advisories/new) or email security@meiert.com directly. Do not report vulnerabilities via public issues.

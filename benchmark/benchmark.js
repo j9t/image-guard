@@ -81,7 +81,7 @@ function runImageGuard(dirCorpus, dirWork) {
   const start = performance.now()
   const run = spawnSync(process.execPath, ['--import', hookPeakMemory, scriptImageGuard, '-q', dirWork], { encoding: 'utf8', env: { ...process.env, IMAGE_GUARD_CACHE_DIR: dirCache } })
   const time = (performance.now() - start) / 1000
-  // The child shares the terminal, so Ctrl + C stops it, too
+  // The child shares the terminal, so Ctrl+C stops it, too
   if (run.signal) throw Object.assign(new Error(`Interrupted (${run.signal})`), { signal: run.signal })
   if (run.status !== 0) throw new Error(`Image Guard failed:\n${run.stderr}`)
   const peakMemory = Number(run.stderr.match(/maxRSS=(\d+)/)[1]) * 1024

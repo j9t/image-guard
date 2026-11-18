@@ -17,6 +17,7 @@ concurrency:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         platform: [ubuntu-latest]
         node: ["lts/*", "current"]
@@ -26,6 +27,7 @@ jobs:
             node: "lts/*"
     name: "Node ${{ matrix.node }} (${{ matrix.platform }})"
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 10
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v7
@@ -74,6 +76,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: "Node lts/* (macOS)"
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v7

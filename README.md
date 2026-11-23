@@ -148,7 +148,7 @@ Tip: Use `--quiet` to suppress these per-file lines and keep only the final summ
 
 Image Guard is a Node script that uses [sharp](https://www.npmjs.com/package/sharp) under the hood.
 
-Automated compression works by monitoring whether a given [change list](https://webglossary.info/terms/change-list/) includes any PNGs, JPGs, GIFs, WebPs, or AVIFs (and HEIC/HEIF when opted in). It’s initiated by a Git hook. Only those images are compressed where there is an improvement. HEIC conversion uses [heic-decode](https://www.npmjs.com/package/heic-decode) for patent-free decoding and sharp for lossy AVIF encoding (quality 80). The processed images can then be committed to the underlying repository.
+Automated compression works by monitoring whether a given [change list](https://webglossary.info/terms/change-list/) includes any PNGs, JPGs, GIFs, WebPs, or AVIFs (and HEIC/HEIF when opted in). It’s initiated by a Git hook. Only those images are compressed where there is an improvement. HEIC conversion uses [heic-decode](https://www.npmjs.com/package/heic-decode) for patent-free decoding and sharp for lossy AVIF encoding (quality 80). With `--staged`, as in the hook, the processed images are staged, too, so they’re committed along with the change that included them.
 
 Compression removes metadata, except for what affects how an image looks: its orientation, its color profile (unless that’s sRGB, which browsers assume anyway), CMYK color, and the bit depth of AVIF images.
 
